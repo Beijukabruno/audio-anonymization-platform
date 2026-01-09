@@ -10,8 +10,8 @@ services:
     volumes:
       - uploads:/app/uploads
       - output:/app/output
-      - ./data:/app/data:ro
-      - ./params:/app/params:ro
+      - ./data:/app/data
+      - ./params:/app/params
     environment:
       - GRADIO_SERVER_NAME=0.0.0.0
       - GRADIO_SERVER_PORT=7860
