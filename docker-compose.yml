@@ -1,17 +1,38 @@
-version: '3.8'
+version: "3.9"
 
 services:
-  audio-anonymizer:
-    build: .
-    container_name: audio-anonymizer
+  audio-anonymization-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: audio-anonymization-local
+    restart: unless-stopped
     ports:
       - "7860:7860"
     volumes:
-      # Mount surrogates directory for easy updates without rebuild
-      - ./data/surrogates:/app/data/surrogates:ro
-      # Mount output directory to persist anonymized files
+      # Mount source code for hot reload during development
+      - ./app:/app/app
+      - ./backend:/app/backend
+      - ./vclm:/app/vclm
+      - ./scripts:/app/scripts
+      # Mount data directories
+      - ./data:/app/data
+      - ./params:/app/params
+      # Mount output directories
+      - ./uploads:/app/uploads
       - ./output:/app/output
     environment:
-      - GRADIO_SERVER_NAME=0.0.0.0
       - GRADIO_SERVER_PORT=7860
-    restart: unless-stopped
+      - GRADIO_SERVER_NAME=0.0.0.0
+    networks:
+      - proxy_hostinger-network
+
+volumes:
+  uploads:
+    driver: local
+  output:
+    driver: local
+
+networks:
+  proxy_hostinger-network:
+    external: true
