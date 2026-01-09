@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -17,7 +15,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      - proxy_hostinger-network
+      - default
 
   audio-anonymization-app:
     build:
@@ -47,7 +45,7 @@ services:
       - GRADIO_SERVER_NAME=0.0.0.0
       - DATABASE_URL=postgresql://audio_user:audio_dev_password@postgres:5432/audio_anony
     networks:
-      - proxy_hostinger-network
+      - default
 
 volumes:
   postgres_data:
@@ -58,5 +56,5 @@ volumes:
     driver: local
 
 networks:
-  proxy_hostinger-network:
-    external: true
+  default:
+    driver: bridge

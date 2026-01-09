@@ -2,6 +2,7 @@ import os
 import logging
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
+from io import BytesIO
 import uuid
 
 import gradio as gr
@@ -90,6 +91,7 @@ def query_processing_history(
             data.append({
                 "ID": job.id,
                 "Filename": job.original_filename,
+                "Output File": job.output_filename or "",
                 "Status": job.status.value,
                 "Method": job.processing_method.value,
                 "Created": job.created_at.strftime("%Y-%m-%d %H:%M:%S") if job.created_at else "",
@@ -357,7 +359,6 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
             input_filename = f"recorded_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
             sr, samples = audio
             from pydub import AudioSegment
-            from io import BytesIO
             seg = AudioSegment(
                 samples.tobytes(),
                 frame_rate=sr,
@@ -411,40 +412,8 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
             log.warning("No valid annotations to process")
             return None
 
-        # Start database logging
-        db_logger = None
-        if DB_ENABLED and ProcessingJobLogger:
-            try:
-                db_logger = ProcessingJobLogger(
-                    original_filename=input_filename,
-                    processing_method="both",  # surrogate + voice mod
-                    parameters={"format": fmt, "strategy": "direct", "annotations": len(annotations_local)},
-                    user_session_id=SESSION_ID,
-                )
-                db_logger.__enter__()
-                
-                # Log input metadata
-                if db_logger.job:
-                    from pydub import AudioSegment as AS
-                    temp_audio = AS.from_file(BytesIO(audio_bytes), format=input_format_local)
-                    db_logger.update_input_metadata(
-                        file_size=len(audio_bytes),
-                        duration=len(temp_audio) / 1000.0,
-                        sample_rate=temp_audio.frame_rate,
-                        channels=temp_audio.channels,
-                    )
-                    db_logger.update_detection_metadata(
-                        gender=detected_gender,
-                        language=detected_language,
-                    )
-            except Exception as e:
-                log.error(f"Database logging failed: {e}")
-                db_logger = None
-
-        try:
+        def _process_and_save(db_logger=None):
             log.info(f"Calling anonymize_to_bytes with {len(annotations_local)} annotations")
-            
-            # Load default voice modification parameters
             default_params_path = os.path.join(os.path.dirname(__file__), "..", "params", "mixed_medium_alt.json")
 
             out_bytes_local = anonymize_to_bytes(
@@ -456,19 +425,19 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                 strategy="direct",
                 params_file=default_params_path,
             )
-            
+
             log.info(f"Anonymization complete, output size: {len(out_bytes_local)} bytes")
-            
+
             # Save to output directory with unique timestamp
             output_dir = os.path.join(os.path.dirname(__file__), "..", "output")
             os.makedirs(output_dir, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Include milliseconds
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
             out_name = f"anonymized_{timestamp}.{fmt}"
             out_path = os.path.join(output_dir, out_name)
             with open(out_path, "wb") as f:
                 f.write(out_bytes_local)
             log.info(f"Saved anonymized audio to: {out_path}")
-            
+
             # Log output metadata
             if db_logger and db_logger.job:
                 from pydub import AudioSegment as AS
@@ -478,19 +447,37 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                     file_size=len(out_bytes_local),
                     duration=len(out_audio) / 1000.0,
                 )
-            
-            log.info("=== Anonymization process complete ===")
+
             return out_path
-            
-        except Exception as e:
-            log.error(f"Anonymization failed: {e}")
-            raise
-        finally:
-            if db_logger:
-                try:
-                    db_logger.__exit__(None, None, None)
-                except Exception:
-                    pass
+
+        if DB_ENABLED and ProcessingJobLogger:
+            try:
+                with ProcessingJobLogger(
+                    original_filename=input_filename,
+                    processing_method="both",
+                    parameters={"format": fmt, "strategy": "direct", "annotations": len(annotations_local)},
+                    user_session_id=SESSION_ID,
+                ) as db_logger:
+                    if db_logger and db_logger.job:
+                        from pydub import AudioSegment as AS
+                        temp_audio = AS.from_file(BytesIO(audio_bytes), format=input_format_local)
+                        db_logger.update_input_metadata(
+                            file_size=len(audio_bytes),
+                            duration=len(temp_audio) / 1000.0,
+                            sample_rate=temp_audio.frame_rate,
+                            channels=temp_audio.channels,
+                        )
+                        db_logger.update_detection_metadata(
+                            gender=detected_gender,
+                            language=detected_language,
+                        )
+                    return _process_and_save(db_logger)
+            except Exception as e:
+                log.error(f"Anonymization failed (db logging): {e}")
+                raise
+        else:
+            # No DB logging
+            return _process_and_save(None)
 
     anonymize_btn.click(
         run,
@@ -505,123 +492,96 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
     - Output files are saved in the `output/` directory
     """)
 
-# History Tab
-with gr.Blocks(title="Processing History") as history_tab:
-    gr.Markdown("# 📊 Processing History & Logs")
-    gr.Markdown("View and export processing job history with filtering options")
-    
+with gr.Blocks(title="Logs & Stats") as logs_tab:
+    gr.Markdown("# 📊 Logs & Stats")
+    gr.Markdown("Minimal view: recent jobs, export CSV, and quick stats.")
+
     with gr.Row():
-        status_filter = gr.Dropdown(
-            choices=["all", "completed", "failed", "processing"],
-            value="all",
-            label="Status Filter",
-            scale=1
-        )
-        days_filter = gr.Number(
-            label="Days Back",
-            value=7,
-            minimum=1,
-            maximum=365,
-            scale=1
-        )
-        limit_filter = gr.Number(
-            label="Max Results",
-            value=100,
-            minimum=10,
-            maximum=1000,
-            scale=1
-        )
-        refresh_btn = gr.Button("🔄 Refresh", variant="secondary", scale=1)
-        export_btn = gr.Button("📥 Export CSV", variant="primary", scale=1)
-    
-    history_table = gr.Dataframe(
-        label="Processing Jobs",
-        interactive=False,
-        wrap=True,
-    )
-    
-    export_status = gr.Textbox(label="Export Status", interactive=False)
-    download_file = gr.File(label="Download CSV", interactive=False)
-    
+        with gr.Column(scale=2):
+            with gr.Row():
+                status_filter = gr.Dropdown(
+                    choices=["all", "completed", "failed", "processing"],
+                    value="all",
+                    label="Status",
+                )
+                days_filter = gr.Number(label="Days", value=7, minimum=1, maximum=365)
+                limit_filter = gr.Number(label="Limit", value=100, minimum=10, maximum=1000)
+                refresh_btn = gr.Button("🔄 Refresh", variant="secondary")
+                export_btn = gr.Button("📥 Export CSV", variant="primary")
+
+            history_table = gr.Dataframe(
+                label="Processing Jobs",
+                interactive=False,
+                wrap=True,
+            )
+
+            export_status = gr.Textbox(label="Export Status", interactive=False)
+            download_file = gr.File(label="Download CSV", interactive=False)
+
+        with gr.Column(scale=1):
+            gr.Markdown("### Quick Stats")
+            stats_json = gr.JSON(label="Stats Summary")
+            stats_text = gr.Markdown()
+            refresh_stats_btn = gr.Button("🔄 Refresh Stats", variant="secondary")
+
     def load_history(status, days, limit):
         df = query_processing_history(status, int(days), int(limit))
         return df
-    
+
     def export_history():
         csv_path = export_to_csv()
         if csv_path:
-            return f"✅ Exported successfully to {os.path.basename(csv_path)}", csv_path
+            return f"✅ Exported: {os.path.basename(csv_path)}", csv_path
         else:
-            return "❌ Export failed or no data available", None
-    
+            return "❌ Export failed or no data", None
+
+    def load_stats():
+        stats = get_statistics_summary()
+        if "error" in stats or "message" in stats:
+            markdown = f"**{stats.get('error', stats.get('message', 'N/A'))}**"
+        else:
+            markdown = (
+                f"- **Total Jobs**: {stats.get('Total Jobs', 0)}\n"
+                f"- **Success Rate**: {stats.get('Success Rate', '0%')}\n"
+                f"- **Recent (7d)**: {stats.get('Recent (7 days)', 0)}\n"
+                f"- **Avg Time**: {stats.get('Avg Processing Time', 'N/A')}"
+            )
+        return stats, markdown
+
     refresh_btn.click(
         load_history,
         inputs=[status_filter, days_filter, limit_filter],
         outputs=history_table,
     )
-    
+
     export_btn.click(
         export_history,
         inputs=[],
         outputs=[export_status, download_file],
     )
-    
-    # Load initial history
-    history_tab.load(
-        load_history,
-        inputs=[status_filter, days_filter, limit_filter],
-        outputs=history_table,
-    )
 
-# Statistics Tab
-with gr.Blocks(title="Statistics") as stats_tab:
-    gr.Markdown("# 📈 Statistics & Analytics")
-    gr.Markdown("View aggregated statistics and performance metrics")
-    
-    refresh_stats_btn = gr.Button("🔄 Refresh Statistics", variant="primary")
-    
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("### Overall Metrics")
-            stats_json = gr.JSON(label="Statistics Summary")
-        
-        with gr.Column():
-            gr.Markdown("### Quick Facts")
-            stats_text = gr.Markdown()
-    
-    def load_stats():
-        stats = get_statistics_summary()
-        
-        # Format for markdown display
-        if "error" in stats or "message" in stats:
-            markdown = f"**{stats.get('error', stats.get('message', 'N/A'))}**"
-        else:
-            markdown = f"""
-- **Total Jobs**: {stats.get('Total Jobs', 0)}
-- **Success Rate**: {stats.get('Success Rate', '0%')}
-- **Recent Activity**: {stats.get('Recent (7 days)', 0)} jobs in last 7 days
-- **Average Processing Time**: {stats.get('Avg Processing Time', 'N/A')}
-            """
-        
-        return stats, markdown
-    
     refresh_stats_btn.click(
         load_stats,
         inputs=[],
         outputs=[stats_json, stats_text],
     )
-    
-    # Load initial stats
-    stats_tab.load(
+
+    # Initial load
+    logs_tab.load(
+        load_history,
+        inputs=[status_filter, days_filter, limit_filter],
+        outputs=history_table,
+    )
+    logs_tab.load(
         load_stats,
         inputs=[],
         outputs=[stats_json, stats_text],
     )
 
-# Combine all tabs
+# Combine minimal tabs
 with gr.TabbedInterface(
-    [demo, history_tab, stats_tab],
-    ["🎵 Anonymize", "📊 History", "📈 Statistics"],
+    [demo, logs_tab],
+    ["🎵 Anonymize", "📊 Logs"],
     title="Audio Anonymization Platform"
 ) as app:
     pass

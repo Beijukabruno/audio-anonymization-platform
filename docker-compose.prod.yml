@@ -1,18 +1,16 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16-alpine
     container_name: audio-anonymization-db-prod
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=${POSTGRES_DB:-audio_anony}
-      - POSTGRES_USER=${POSTGRES_USER:-audio_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=audio_anony
+      - POSTGRES_USER=audio_user
+      - POSTGRES_PASSWORD=audio_prod_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-audio_user} -d ${POSTGRES_DB:-audio_anony}"]
+      test: ["CMD-SHELL", "pg_isready -U audio_user -d audio_anony"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -36,7 +34,7 @@ services:
     environment:
       - GRADIO_SERVER_NAME=0.0.0.0
       - GRADIO_SERVER_PORT=7860
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-audio_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-audio_anony}
+      - DATABASE_URL=postgresql://audio_user:audio_prod_password@postgres:5432/audio_anony
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7860/"]
       interval: 30s
