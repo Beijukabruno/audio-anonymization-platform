@@ -29,9 +29,9 @@ try:
     from backend.database import init_db, ProcessingStatus
     from backend.db_logger import ProcessingJobLogger, init_surrogate_voices, get_db_session
     DB_ENABLED = True
-    log.info("✅ Database support enabled")
+    log.info("Database support enabled")
 except Exception as e:
-    log.warning(f"⚠️ Database support disabled: {e}")
+    log.warning(f"Database support disabled: {e}")
     DB_ENABLED = False
     ProcessingJobLogger = None
 
@@ -277,7 +277,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
         )
 
     with gr.Row():
-        add_btn = gr.Button("➕ Add Annotation", scale=1)
+        add_btn = gr.Button("Add Annotation", scale=1)
         status_msg = gr.Textbox(label="Messages", interactive=False, value="")
 
     gr.Markdown("## Annotations Table")
@@ -291,7 +291,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
         label="Edit annotations (delete rows by clearing all fields)",
     )
 
-    anonymize_btn = gr.Button("🎵 Anonymize Audio", variant="primary", size="lg")
+    anonymize_btn = gr.Button("Anonymize Audio", variant="primary", size="lg")
     audio_out = gr.Audio(label="Anonymized Output", type="filepath")
 
     def _normalize_rows(current_table):
@@ -323,15 +323,15 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
     def add_annotation(start, end, gend, lbl, lang, current_table):
         """Add a new row to the annotations table."""
         if start is None or end is None:
-            return current_table, "⚠️ Provide both start and end times"
+            return current_table, "Provide both start and end times"
         if end <= start:
-            return current_table, "⚠️ End time must be > start time"
+            return current_table, "End time must be > start time"
 
         current = _normalize_rows(current_table)
         lang_lower = lang.lower()
         new_row = [float(start), float(end), gend, lbl, lang_lower]
         current.append(new_row)
-        return current, f"✓ Added {lbl} ({gend}, {lang}) [{float(start):.3f}s - {float(end):.3f}s]"
+        return current, f"Added {lbl} ({gend}, {lang}) [{float(start):.3f}s - {float(end):.3f}s]"
 
     add_btn.click(
         add_annotation,
@@ -493,7 +493,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
     """)
 
 with gr.Blocks(title="Logs & Stats") as logs_tab:
-    gr.Markdown("# 📊 Logs & Stats")
+    gr.Markdown("# Logs & Stats")
     gr.Markdown("Minimal view: recent jobs, export CSV, and quick stats.")
 
     with gr.Row():
@@ -506,8 +506,8 @@ with gr.Blocks(title="Logs & Stats") as logs_tab:
                 )
                 days_filter = gr.Number(label="Days", value=7, minimum=1, maximum=365)
                 limit_filter = gr.Number(label="Limit", value=100, minimum=10, maximum=1000)
-                refresh_btn = gr.Button("🔄 Refresh", variant="secondary")
-                export_btn = gr.Button("📥 Export CSV", variant="primary")
+                refresh_btn = gr.Button("Refresh", variant="secondary")
+                export_btn = gr.Button("Export CSV", variant="primary")
 
             history_table = gr.Dataframe(
                 label="Processing Jobs",
@@ -522,7 +522,7 @@ with gr.Blocks(title="Logs & Stats") as logs_tab:
             gr.Markdown("### Quick Stats")
             stats_json = gr.JSON(label="Stats Summary")
             stats_text = gr.Markdown()
-            refresh_stats_btn = gr.Button("🔄 Refresh Stats", variant="secondary")
+            refresh_stats_btn = gr.Button("Refresh Stats", variant="secondary")
 
     def load_history(status, days, limit):
         df = query_processing_history(status, int(days), int(limit))
@@ -531,9 +531,9 @@ with gr.Blocks(title="Logs & Stats") as logs_tab:
     def export_history():
         csv_path = export_to_csv()
         if csv_path:
-            return f"✅ Exported: {os.path.basename(csv_path)}", csv_path
+            return f"Exported: {os.path.basename(csv_path)}", csv_path
         else:
-            return "❌ Export failed or no data", None
+            return "Export failed or no data", None
 
     def load_stats():
         stats = get_statistics_summary()
@@ -581,7 +581,7 @@ with gr.Blocks(title="Logs & Stats") as logs_tab:
 # Combine minimal tabs
 with gr.TabbedInterface(
     [demo, logs_tab],
-    ["🎵 Anonymize", "📊 Logs"],
+    ["Anonymize", "Logs"],
     title="Audio Anonymization Platform"
 ) as app:
     pass
@@ -592,7 +592,7 @@ if __name__ == "__main__":
         try:
             init_db()
             init_surrogate_voices(SURROGATES_ROOT)
-            log.info("✅ Database initialized successfully")
+            log.info("Database initialized successfully")
         except Exception as e:
             log.error(f"Failed to initialize database: {e}")
     
