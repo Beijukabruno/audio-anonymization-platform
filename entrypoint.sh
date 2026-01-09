@@ -1,5 +1,7 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
+
+export PYTHONUNBUFFERED=1
 
 echo "Starting Audio Anonymizer..."
 
@@ -7,11 +9,21 @@ echo "Starting Audio Anonymizer..."
 echo "Ensuring directories exist..."
 mkdir -p /app/output
 mkdir -p /app/uploads
-mkdir -p /app/data/surrogates/luganda/{male,female}/{person,user_id,location}
-mkdir -p /app/data/surrogates/english/{male,female}/{person,user_id,location}
+mkdir -p /app/data/surrogates/luganda/male/person
+mkdir -p /app/data/surrogates/luganda/male/user_id
+mkdir -p /app/data/surrogates/luganda/male/location
+mkdir -p /app/data/surrogates/luganda/female/person
+mkdir -p /app/data/surrogates/luganda/female/user_id
+mkdir -p /app/data/surrogates/luganda/female/location
+mkdir -p /app/data/surrogates/english/male/person
+mkdir -p /app/data/surrogates/english/male/user_id
+mkdir -p /app/data/surrogates/english/male/location
+mkdir -p /app/data/surrogates/english/female/person
+mkdir -p /app/data/surrogates/english/female/user_id
+mkdir -p /app/data/surrogates/english/female/location
 
 # Check if surrogates directory has any files
-SURROGATE_COUNT=$(find /app/data/surrogates -type f \( -name "*.wav" -o -name "*.mp3" -o -name "*.flac" -o -name "*.ogg" -o -name "*.m4a" \) 2>/dev/null | wc -l)
+SURROGATE_COUNT=$(find /app/data/surrogates -type f -name "*.wav" -o -name "*.mp3" -o -name "*.flac" -o -name "*.ogg" -o -name "*.m4a" 2>/dev/null | wc -l)
 
 if [ "$SURROGATE_COUNT" -eq 0 ]; then
     echo "WARNING: No surrogate audio files found in /app/data/surrogates/"
@@ -22,11 +34,11 @@ else
 fi
 
 # Set default environment variables if not provided
-export GRADIO_SERVER_NAME="${GRADIO_SERVER_NAME:-0.0.0.0}"
-export GRADIO_SERVER_PORT="${GRADIO_SERVER_PORT:-7860}"
+GRADIO_SERVER_NAME="${GRADIO_SERVER_NAME:-0.0.0.0}"
+GRADIO_SERVER_PORT="${GRADIO_SERVER_PORT:-7860}"
 
-echo "Server will bind to: ${GRADIO_SERVER_NAME}:${GRADIO_SERVER_PORT}"
+echo "Server will bind to: $GRADIO_SERVER_NAME:$GRADIO_SERVER_PORT"
 
 # Start the Gradio app
 echo "Launching Gradio application..."
-exec python3 app/gradio_app.py
+exec python3 app/gradio_app.py --server-name "$GRADIO_SERVER_NAME" --server-port "$GRADIO_SERVER_PORT"
