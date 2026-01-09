@@ -1,9 +1,11 @@
 import os
 import logging
 from typing import List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
+import uuid
 
 import gradio as gr
+import pandas as pd
 
 # Configure logging
 log = logging.getLogger(__name__)
@@ -21,10 +23,159 @@ if PROJECT_ROOT not in sys.path:
 from backend.models import Annotation
 from backend.audio_processing import anonymize_to_bytes
 
+# Try to import database functionality (graceful degradation if DB not available)
+try:
+    from backend.database import init_db, ProcessingStatus
+    from backend.db_logger import ProcessingJobLogger, init_surrogate_voices, get_db_session
+    DB_ENABLED = True
+    log.info("✅ Database support enabled")
+except Exception as e:
+    log.warning(f"⚠️ Database support disabled: {e}")
+    DB_ENABLED = False
+    ProcessingJobLogger = None
+
 SURROGATES_ROOT = os.path.join(os.path.dirname(__file__), "..", "data", "surrogates")
 
 PREDEFINED_LABELS = ["PERSON", "USER_ID", "LOCATION"]
 SUPPORTED_LANGUAGES = ["luganda", "english"]
+
+# Generate a session ID for this instance
+SESSION_ID = str(uuid.uuid4())
+
+
+# Database query functions for history and statistics
+def query_processing_history(
+    status_filter: str = "all",
+    days_back: int = 7,
+    limit: int = 100
+) -> pd.DataFrame:
+    """Query processing history from database."""
+    if not DB_ENABLED:
+        return pd.DataFrame({"message": ["Database not available"]})
+    
+    try:
+        from backend.database import ProcessingJob
+        db = get_db_session()
+        
+        # Base query
+        query = db.query(ProcessingJob)
+        
+        # Filter by status
+        if status_filter != "all":
+            status_map = {
+                "completed": ProcessingStatus.COMPLETED,
+                "failed": ProcessingStatus.FAILED,
+                "processing": ProcessingStatus.PROCESSING,
+            }
+            if status_filter in status_map:
+                query = query.filter(ProcessingJob.status == status_map[status_filter])
+        
+        # Filter by date range
+        if days_back > 0:
+            cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+            query = query.filter(ProcessingJob.created_at >= cutoff_date)
+        
+        # Order and limit
+        query = query.order_by(ProcessingJob.created_at.desc()).limit(limit)
+        
+        jobs = query.all()
+        db.close()
+        
+        if not jobs:
+            return pd.DataFrame({"message": ["No processing jobs found"]})
+        
+        # Convert to DataFrame
+        data = []
+        for job in jobs:
+            data.append({
+                "ID": job.id,
+                "Filename": job.original_filename,
+                "Status": job.status.value,
+                "Method": job.processing_method.value,
+                "Created": job.created_at.strftime("%Y-%m-%d %H:%M:%S") if job.created_at else "",
+                "Duration (s)": f"{job.processing_duration_seconds:.2f}" if job.processing_duration_seconds else "",
+                "Size (KB)": f"{job.original_file_size/1024:.1f}" if job.original_file_size else "",
+                "Gender": job.gender_detected.value if job.gender_detected else "",
+                "Language": job.language_detected or "",
+                "Surrogate": job.surrogate_voice_used or "",
+                "Error": job.error_message or "",
+            })
+        
+        return pd.DataFrame(data)
+    
+    except Exception as e:
+        log.error(f"Failed to query processing history: {e}")
+        return pd.DataFrame({"error": [str(e)]})
+
+
+def get_statistics_summary() -> Dict[str, Any]:
+    """Get summary statistics from database."""
+    if not DB_ENABLED:
+        return {"message": "Database not available"}
+    
+    try:
+        from backend.database import ProcessingJob
+        db = get_db_session()
+        
+        # Overall stats
+        total_jobs = db.query(ProcessingJob).count()
+        completed = db.query(ProcessingJob).filter(ProcessingJob.status == ProcessingStatus.COMPLETED).count()
+        failed = db.query(ProcessingJob).filter(ProcessingJob.status == ProcessingStatus.FAILED).count()
+        
+        # Recent stats (last 7 days)
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        recent_jobs = db.query(ProcessingJob).filter(ProcessingJob.created_at >= week_ago).count()
+        
+        # Average processing time
+        avg_time_result = db.query(ProcessingJob.processing_duration_seconds).filter(
+            ProcessingJob.processing_duration_seconds.isnot(None)
+        ).all()
+        avg_time = sum(t[0] for t in avg_time_result) / len(avg_time_result) if avg_time_result else 0
+        
+        db.close()
+        
+        success_rate = (completed / total_jobs * 100) if total_jobs > 0 else 0
+        
+        return {
+            "Total Jobs": total_jobs,
+            "Completed": completed,
+            "Failed": failed,
+            "Success Rate": f"{success_rate:.1f}%",
+            "Recent (7 days)": recent_jobs,
+            "Avg Processing Time": f"{avg_time:.2f}s",
+        }
+    
+    except Exception as e:
+        log.error(f"Failed to get statistics: {e}")
+        return {"error": str(e)}
+
+
+def export_to_csv() -> str:
+    """Export processing history to CSV file."""
+    if not DB_ENABLED:
+        return None
+    
+    try:
+        df = query_processing_history(status_filter="all", days_back=30, limit=1000)
+        
+        if df.empty or "message" in df.columns or "error" in df.columns:
+            log.warning("No data to export")
+            return None
+        
+        # Save to output directory
+        output_dir = os.path.join(os.path.dirname(__file__), "..", "output")
+        os.makedirs(output_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_path = os.path.join(output_dir, f"processing_history_{timestamp}.csv")
+        
+        df.to_csv(csv_path, index=False)
+        log.info(f"Exported {len(df)} records to {csv_path}")
+        
+        return csv_path
+    
+    except Exception as e:
+        log.error(f"Failed to export CSV: {e}")
+        return None
 
 
 def process(audio: tuple, table: List[Dict[str, Any]], output_format: str = "wav"):
@@ -187,7 +338,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
     )
 
     def run(audio, table_data, fmt):
-        """Process audio with annotations."""
+        """Process audio with annotations (with database logging)."""
         log.info("=== Starting anonymization process ===")
         log.info(f"Output format: {fmt}")
         
@@ -195,12 +346,15 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
             log.warning("No audio provided")
             return None
         
+        # Determine input filename
         if isinstance(audio, str) and os.path.exists(audio):
+            input_filename = os.path.basename(audio)
             with open(audio, "rb") as f:
                 audio_bytes = f.read()
             input_format_local = os.path.splitext(audio)[1].lstrip(".").lower() or "wav"
             log.info(f"Loaded audio from file: {audio}, format: {input_format_local}, size: {len(audio_bytes)} bytes")
         else:
+            input_filename = f"recorded_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
             sr, samples = audio
             from pydub import AudioSegment
             from io import BytesIO
@@ -221,6 +375,9 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
         log.info(f"Normalized to {len(rows)} rows")
         
         annotations_local: List[Annotation] = []
+        detected_gender = None
+        detected_language = None
+        
         for idx, r in enumerate(rows):
             try:
                 start = float(r[0]) if len(r) > 0 and r[0] is not None else 0.0
@@ -228,6 +385,12 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                 gender = str(r[2]).lower() if len(r) > 2 and r[2] is not None else "male"
                 label = str(r[3]).upper().strip() if len(r) > 3 and r[3] is not None else "PERSON"
                 lang = str(r[4]).lower() if len(r) > 4 and r[4] is not None else "luganda"
+                
+                # Capture first gender/language for DB logging
+                if detected_gender is None:
+                    detected_gender = gender
+                if detected_language is None:
+                    detected_language = lang
                 
                 log.info(f"   Row {idx+1}: start={start}, end={end}, gender={gender}, label={label}, language={lang}")
                 
@@ -248,34 +411,86 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
             log.warning("No valid annotations to process")
             return None
 
-        log.info(f"Calling anonymize_to_bytes with {len(annotations_local)} annotations")
-        
-        # Load default voice modification parameters
-        default_params_path = os.path.join(os.path.dirname(__file__), "..", "params", "mixed_medium_alt.json")
+        # Start database logging
+        db_logger = None
+        if DB_ENABLED and ProcessingJobLogger:
+            try:
+                db_logger = ProcessingJobLogger(
+                    original_filename=input_filename,
+                    processing_method="both",  # surrogate + voice mod
+                    parameters={"format": fmt, "strategy": "direct", "annotations": len(annotations_local)},
+                    user_session_id=SESSION_ID,
+                )
+                db_logger.__enter__()
+                
+                # Log input metadata
+                if db_logger.job:
+                    from pydub import AudioSegment as AS
+                    temp_audio = AS.from_file(BytesIO(audio_bytes), format=input_format_local)
+                    db_logger.update_input_metadata(
+                        file_size=len(audio_bytes),
+                        duration=len(temp_audio) / 1000.0,
+                        sample_rate=temp_audio.frame_rate,
+                        channels=temp_audio.channels,
+                    )
+                    db_logger.update_detection_metadata(
+                        gender=detected_gender,
+                        language=detected_language,
+                    )
+            except Exception as e:
+                log.error(f"Database logging failed: {e}")
+                db_logger = None
 
-        out_bytes_local = anonymize_to_bytes(
-            audio_bytes,
-            annotations_local,
-            SURROGATES_ROOT,
-            input_format=input_format_local,
-            output_format=fmt,
-            strategy="direct",
-            params_file=default_params_path,
-        )
-        
-        log.info(f"Anonymization complete, output size: {len(out_bytes_local)} bytes")
-        
-        # Save to output directory with unique timestamp
-        output_dir = os.path.join(os.path.dirname(__file__), "..", "output")
-        os.makedirs(output_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Include milliseconds
-        out_name = f"anonymized_{timestamp}.{fmt}"
-        out_path = os.path.join(output_dir, out_name)
-        with open(out_path, "wb") as f:
-            f.write(out_bytes_local)
-        log.info(f"Saved anonymized audio to: {out_path}")
-        log.info("=== Anonymization process complete ===")
-        return out_path
+        try:
+            log.info(f"Calling anonymize_to_bytes with {len(annotations_local)} annotations")
+            
+            # Load default voice modification parameters
+            default_params_path = os.path.join(os.path.dirname(__file__), "..", "params", "mixed_medium_alt.json")
+
+            out_bytes_local = anonymize_to_bytes(
+                audio_bytes,
+                annotations_local,
+                SURROGATES_ROOT,
+                input_format=input_format_local,
+                output_format=fmt,
+                strategy="direct",
+                params_file=default_params_path,
+            )
+            
+            log.info(f"Anonymization complete, output size: {len(out_bytes_local)} bytes")
+            
+            # Save to output directory with unique timestamp
+            output_dir = os.path.join(os.path.dirname(__file__), "..", "output")
+            os.makedirs(output_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # Include milliseconds
+            out_name = f"anonymized_{timestamp}.{fmt}"
+            out_path = os.path.join(output_dir, out_name)
+            with open(out_path, "wb") as f:
+                f.write(out_bytes_local)
+            log.info(f"Saved anonymized audio to: {out_path}")
+            
+            # Log output metadata
+            if db_logger and db_logger.job:
+                from pydub import AudioSegment as AS
+                out_audio = AS.from_file(BytesIO(out_bytes_local), format=fmt)
+                db_logger.update_output_metadata(
+                    filename=out_name,
+                    file_size=len(out_bytes_local),
+                    duration=len(out_audio) / 1000.0,
+                )
+            
+            log.info("=== Anonymization process complete ===")
+            return out_path
+            
+        except Exception as e:
+            log.error(f"Anonymization failed: {e}")
+            raise
+        finally:
+            if db_logger:
+                try:
+                    db_logger.__exit__(None, None, None)
+                except Exception:
+                    pass
 
     anonymize_btn.click(
         run,
@@ -290,5 +505,135 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
     - Output files are saved in the `output/` directory
     """)
 
+# History Tab
+with gr.Blocks(title="Processing History") as history_tab:
+    gr.Markdown("# 📊 Processing History & Logs")
+    gr.Markdown("View and export processing job history with filtering options")
+    
+    with gr.Row():
+        status_filter = gr.Dropdown(
+            choices=["all", "completed", "failed", "processing"],
+            value="all",
+            label="Status Filter",
+            scale=1
+        )
+        days_filter = gr.Number(
+            label="Days Back",
+            value=7,
+            minimum=1,
+            maximum=365,
+            scale=1
+        )
+        limit_filter = gr.Number(
+            label="Max Results",
+            value=100,
+            minimum=10,
+            maximum=1000,
+            scale=1
+        )
+        refresh_btn = gr.Button("🔄 Refresh", variant="secondary", scale=1)
+        export_btn = gr.Button("📥 Export CSV", variant="primary", scale=1)
+    
+    history_table = gr.Dataframe(
+        label="Processing Jobs",
+        interactive=False,
+        wrap=True,
+    )
+    
+    export_status = gr.Textbox(label="Export Status", interactive=False)
+    download_file = gr.File(label="Download CSV", interactive=False)
+    
+    def load_history(status, days, limit):
+        df = query_processing_history(status, int(days), int(limit))
+        return df
+    
+    def export_history():
+        csv_path = export_to_csv()
+        if csv_path:
+            return f"✅ Exported successfully to {os.path.basename(csv_path)}", csv_path
+        else:
+            return "❌ Export failed or no data available", None
+    
+    refresh_btn.click(
+        load_history,
+        inputs=[status_filter, days_filter, limit_filter],
+        outputs=history_table,
+    )
+    
+    export_btn.click(
+        export_history,
+        inputs=[],
+        outputs=[export_status, download_file],
+    )
+    
+    # Load initial history
+    history_tab.load(
+        load_history,
+        inputs=[status_filter, days_filter, limit_filter],
+        outputs=history_table,
+    )
+
+# Statistics Tab
+with gr.Blocks(title="Statistics") as stats_tab:
+    gr.Markdown("# 📈 Statistics & Analytics")
+    gr.Markdown("View aggregated statistics and performance metrics")
+    
+    refresh_stats_btn = gr.Button("🔄 Refresh Statistics", variant="primary")
+    
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("### Overall Metrics")
+            stats_json = gr.JSON(label="Statistics Summary")
+        
+        with gr.Column():
+            gr.Markdown("### Quick Facts")
+            stats_text = gr.Markdown()
+    
+    def load_stats():
+        stats = get_statistics_summary()
+        
+        # Format for markdown display
+        if "error" in stats or "message" in stats:
+            markdown = f"**{stats.get('error', stats.get('message', 'N/A'))}**"
+        else:
+            markdown = f"""
+- **Total Jobs**: {stats.get('Total Jobs', 0)}
+- **Success Rate**: {stats.get('Success Rate', '0%')}
+- **Recent Activity**: {stats.get('Recent (7 days)', 0)} jobs in last 7 days
+- **Average Processing Time**: {stats.get('Avg Processing Time', 'N/A')}
+            """
+        
+        return stats, markdown
+    
+    refresh_stats_btn.click(
+        load_stats,
+        inputs=[],
+        outputs=[stats_json, stats_text],
+    )
+    
+    # Load initial stats
+    stats_tab.load(
+        load_stats,
+        inputs=[],
+        outputs=[stats_json, stats_text],
+    )
+
+# Combine all tabs
+with gr.TabbedInterface(
+    [demo, history_tab, stats_tab],
+    ["🎵 Anonymize", "📊 History", "📈 Statistics"],
+    title="Audio Anonymization Platform"
+) as app:
+    pass
+
 if __name__ == "__main__":
-    demo.launch()
+    # Initialize database on startup
+    if DB_ENABLED:
+        try:
+            init_db()
+            init_surrogate_voices(SURROGATES_ROOT)
+            log.info("✅ Database initialized successfully")
+        except Exception as e:
+            log.error(f"Failed to initialize database: {e}")
+    
+    app.launch()

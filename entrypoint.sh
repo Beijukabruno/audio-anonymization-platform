@@ -39,6 +39,36 @@ GRADIO_SERVER_PORT="${GRADIO_SERVER_PORT:-7860}"
 
 echo "Server will bind to: $GRADIO_SERVER_NAME:$GRADIO_SERVER_PORT"
 
+# Wait for PostgreSQL to be ready (if DATABASE_URL is set)
+if [ -n "${DATABASE_URL:-}" ]; then
+    echo "Database configured, waiting for PostgreSQL to be ready..."
+    MAX_RETRIES=30
+    RETRY_COUNT=0
+    
+    while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+        if python3 -c "from backend.database import engine; engine.connect()" 2>/dev/null; then
+            echo "✅ Database connection successful"
+            
+            # Initialize database tables
+            echo "Initializing database tables..."
+            python3 -c "from backend.database import init_db; init_db()" || echo "⚠️ Database init failed, continuing anyway"
+            
+            break
+        else
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "Waiting for database... ($RETRY_COUNT/$MAX_RETRIES)"
+            sleep 2
+        fi
+    done
+    
+    if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+        echo "⚠️ WARNING: Could not connect to database after $MAX_RETRIES attempts"
+        echo "   Application will start without database logging"
+    fi
+else
+    echo "No DATABASE_URL configured, skipping database initialization"
+fi
+
 # Start the Gradio app
 echo "Launching Gradio application..."
 exec python3 app/gradio_app.py --server-name "$GRADIO_SERVER_NAME" --server-port "$GRADIO_SERVER_PORT"

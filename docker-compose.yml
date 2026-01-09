@@ -1,12 +1,33 @@
 version: "3.9"
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: audio-anonymization-db-local
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=audio_anony
+      - POSTGRES_USER=audio_user
+      - POSTGRES_PASSWORD=audio_dev_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U audio_user -d audio_anony"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - proxy_hostinger-network
+
   audio-anonymization-app:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: audio-anonymization-local
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "7860:7860"
     volumes:
@@ -24,10 +45,13 @@ services:
     environment:
       - GRADIO_SERVER_PORT=7860
       - GRADIO_SERVER_NAME=0.0.0.0
+      - DATABASE_URL=postgresql://audio_user:audio_dev_password@postgres:5432/audio_anony
     networks:
       - proxy_hostinger-network
 
 volumes:
+  postgres_data:
+    driver: local
   uploads:
     driver: local
   output:

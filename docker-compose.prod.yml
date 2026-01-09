@@ -1,10 +1,31 @@
 version: "3.9"
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: audio-anonymization-db-prod
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-audio_anony}
+      - POSTGRES_USER=${POSTGRES_USER:-audio_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-audio_user} -d ${POSTGRES_DB:-audio_anony}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - proxy_hostinger-network
+
   audio-anonymization-api:
     image: beijuka/audio-anonymization:latest
     container_name: audio-anonymization-api
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "7860:7860"
     volumes:
@@ -15,6 +36,7 @@ services:
     environment:
       - GRADIO_SERVER_NAME=0.0.0.0
       - GRADIO_SERVER_PORT=7860
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-audio_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-audio_anony}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:7860/"]
       interval: 30s
@@ -25,6 +47,8 @@ services:
       - proxy_hostinger-network
 
 volumes:
+  postgres_data:
+    driver: local
   uploads:
     driver: local
   output:
