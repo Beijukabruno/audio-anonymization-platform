@@ -247,13 +247,6 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
     # Waveform section removed as requested
     
     with gr.Row():
-        language = gr.Dropdown(
-            choices=["English"],
-            value="English",
-            label="Surrogate Language",
-            info="Language of replacement audio",
-            scale=1
-        )
         output_format = gr.Dropdown(
             choices=["wav", "mp3", "flac"],
             value="wav",
@@ -282,10 +275,10 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
 
     gr.Markdown("## Annotations Table")
     table = gr.Dataframe(
-        headers=["start_sec", "end_sec", "gender", "label", "language"],
-        datatype=["number", "number", "str", "str", "str"],
+        headers=["start_sec", "end_sec", "gender", "label"],
+        datatype=["number", "number", "str", "str"],
         row_count=(0, "dynamic"),
-        col_count=(5, "fixed"),
+        col_count=(4, "fixed"),
         value=[],
         interactive=True,
         label="Edit annotations (delete rows by clearing all fields)",
@@ -320,7 +313,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
         except Exception:
             return []
 
-    def add_annotation(start, end, gend, lbl, lang, current_table):
+    def add_annotation(start, end, gend, lbl, current_table):
         """Add a new row to the annotations table."""
         if start is None or end is None:
             return current_table, "Provide both start and end times"
@@ -328,17 +321,14 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
             return current_table, "End time must be > start time"
 
         current = _normalize_rows(current_table)
-        # Normalize language: convert luganda to english for backward compatibility
-        lang_lower = lang.lower()
-        if lang_lower == "luganda":
-            lang_lower = "english"
-        new_row = [float(start), float(end), gend, lbl, lang_lower]
+        # Language is always english (hardcoded)
+        new_row = [float(start), float(end), gend, lbl]
         current.append(new_row)
-        return current, f"Added {lbl} ({gend}, {lang}) [{float(start):.3f}s - {float(end):.3f}s]"
+        return current, f"Added {lbl} ({gend}) [{float(start):.3f}s - {float(end):.3f}s]"
 
     add_btn.click(
         add_annotation,
-        inputs=[start_sec, end_sec, gender, label, language, table],
+        inputs=[start_sec, end_sec, gender, label, table],
         outputs=[table, status_msg],
     )
 
@@ -388,10 +378,8 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                 end = float(r[1]) if len(r) > 1 and r[1] is not None else 0.0
                 gender = str(r[2]).lower() if len(r) > 2 and r[2] is not None else "male"
                 label = str(r[3]).upper().strip() if len(r) > 3 and r[3] is not None else "PERSON"
-                lang = str(r[4]).lower() if len(r) > 4 and r[4] is not None else "english"
-                # Normalize language: convert luganda to english for backward compatibility
-                if lang == "luganda":
-                    lang = "english"
+                # Language is always english (hardcoded)
+                lang = "english"
                 
                 # Capture first gender/language for DB logging
                 if detected_gender is None:
