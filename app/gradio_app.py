@@ -38,7 +38,7 @@ except Exception as e:
 SURROGATES_ROOT = os.path.join(os.path.dirname(__file__), "..", "data", "surrogates")
 
 PREDEFINED_LABELS = ["PERSON", "USER_ID", "LOCATION"]
-SUPPORTED_LANGUAGES = ["luganda", "english"]
+SUPPORTED_LANGUAGES = ["english"]
 
 # Generate a session ID for this instance
 SESSION_ID = str(uuid.uuid4())
@@ -248,8 +248,8 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
     
     with gr.Row():
         language = gr.Dropdown(
-            choices=["Luganda", "English"],
-            value="Luganda",
+            choices=["English"],
+            value="English",
             label="Surrogate Language",
             info="Language of replacement audio",
             scale=1
@@ -385,7 +385,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                 end = float(r[1]) if len(r) > 1 and r[1] is not None else 0.0
                 gender = str(r[2]).lower() if len(r) > 2 and r[2] is not None else "male"
                 label = str(r[3]).upper().strip() if len(r) > 3 and r[3] is not None else "PERSON"
-                lang = str(r[4]).lower() if len(r) > 4 and r[4] is not None else "luganda"
+                lang = str(r[4]).lower() if len(r) > 4 and r[4] is not None else "english"
                 
                 # Capture first gender/language for DB logging
                 if detected_gender is None:

@@ -7,7 +7,7 @@ class Annotation:
     end_sec: float
     gender: str  # 'male' | 'female'
     label: Optional[str] = None
-    language: str = "luganda"  # 'luganda' | 'english'
+    language: str = "english"  # default language for surrogates
 
     def duration_ms(self) -> int:
         return int(max(0.0, (self.end_sec - self.start_sec)) * 1000)

@@ -44,10 +44,10 @@ def _list_audio_files(folder: str) -> List[str]:
     return files
 
 
-def _pick_surrogate_path(surrogates_root: str, gender: str, label: Optional[str], language: str = "luganda") -> Optional[str]:
+def _pick_surrogate_path(surrogates_root: str, gender: str, label: Optional[str], language: str = "english") -> Optional[str]:
     gender = (gender or "male").lower()  # Default to male if missing
     label = (label or "").strip().lower() or None
-    language = (language or "luganda").lower()
+    language = (language or "english").lower()
     
     log.info(f"_pick_surrogate_path called: gender={gender}, label={label}, language={language}")
 
@@ -101,7 +101,7 @@ def _pick_surrogate_path(surrogates_root: str, gender: str, label: Optional[str]
     return None
 
 
-def _load_and_fit_surrogate(surrogates_root: str, gender: str, label: Optional[str], target_ms: int, sample_rate: int, language: str = "luganda") -> AudioSegment:
+def _load_and_fit_surrogate(surrogates_root: str, gender: str, label: Optional[str], target_ms: int, sample_rate: int, language: str = "english") -> AudioSegment:
     path = _pick_surrogate_path(surrogates_root, gender, label, language)
     if path and os.path.exists(path):
         seg = AudioSegment.from_file(path)
@@ -120,7 +120,7 @@ def _load_and_fit_surrogate(surrogates_root: str, gender: str, label: Optional[s
     return seg
 
 
-def _load_surrogate_direct(surrogates_root: str, gender: str, label: Optional[str], sample_rate: int, language: str = "luganda") -> AudioSegment:
+def _load_surrogate_direct(surrogates_root: str, gender: str, label: Optional[str], sample_rate: int, language: str = "english") -> AudioSegment:
     path = _pick_surrogate_path(surrogates_root, gender, label, language)
     if path and os.path.exists(path):
         seg = AudioSegment.from_file(path)
