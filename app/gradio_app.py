@@ -328,7 +328,10 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
             return current_table, "End time must be > start time"
 
         current = _normalize_rows(current_table)
+        # Normalize language: convert luganda to english for backward compatibility
         lang_lower = lang.lower()
+        if lang_lower == "luganda":
+            lang_lower = "english"
         new_row = [float(start), float(end), gend, lbl, lang_lower]
         current.append(new_row)
         return current, f"Added {lbl} ({gend}, {lang}) [{float(start):.3f}s - {float(end):.3f}s]"
@@ -386,6 +389,9 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                 gender = str(r[2]).lower() if len(r) > 2 and r[2] is not None else "male"
                 label = str(r[3]).upper().strip() if len(r) > 3 and r[3] is not None else "PERSON"
                 lang = str(r[4]).lower() if len(r) > 4 and r[4] is not None else "english"
+                # Normalize language: convert luganda to english for backward compatibility
+                if lang == "luganda":
+                    lang = "english"
                 
                 # Capture first gender/language for DB logging
                 if detected_gender is None:

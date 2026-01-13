@@ -200,7 +200,7 @@ def init_surrogate_voices(surrogates_root: str, db_session=None):
     
     try:
         # Scan surrogate directories
-        for language in ['english', 'luganda']:
+        for language in ['english']:
             lang_path = os.path.join(surrogates_root, language)
             if not os.path.isdir(lang_path):
                 continue
