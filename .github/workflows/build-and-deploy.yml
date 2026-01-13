@@ -32,6 +32,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          no-cache: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/audio-anonymization:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/audio-anonymization:${{ github.sha }}

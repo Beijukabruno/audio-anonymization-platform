@@ -106,12 +106,8 @@ def _load_and_fit_surrogate(surrogates_root: str, gender: str, label: Optional[s
     if path and os.path.exists(path):
         seg = AudioSegment.from_file(path)
     else:
-        # Fallback: generate a harmless tone or silence to avoid leakage
-        # Using a 400 Hz sine tone as placeholder (replace with real surrogates)
-        if target_ms <= 0:
-            target_ms = 1
-        seg = Sine(400).to_audio_segment(duration=target_ms).apply_gain(-20)
-        seg = seg.set_frame_rate(sample_rate)
+        # No fallback: raise error if surrogate not found to ensure only real surrogates are used
+        raise ValueError(f"No surrogate found for gender={gender}, label={label}, language={language}. Please add surrogate files to data/surrogates/{language}/{gender}/{label}/")
 
     # Fit surrogate to target length: trim or pad with silence
     if len(seg) > target_ms:
@@ -129,8 +125,8 @@ def _load_surrogate_direct(surrogates_root: str, gender: str, label: Optional[st
     if path and os.path.exists(path):
         seg = AudioSegment.from_file(path)
     else:
-        # Minimal fallback: short tone (no length fitting). Use 500 ms as placeholder.
-        seg = Sine(400).to_audio_segment(duration=500).apply_gain(-20)
+        # No fallback: raise error if surrogate not found to ensure only real surrogates are used
+        raise ValueError(f"No surrogate found for gender={gender}, label={label}, language={language}. Please add surrogate files to data/surrogates/{language}/{gender}/{label}/")
     # Normalize format to input sample rate/channels later; do not pad/trim/fade.
     return seg
 
