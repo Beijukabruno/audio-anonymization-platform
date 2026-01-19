@@ -2,7 +2,7 @@
 
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from contextlib import contextmanager
 
@@ -87,14 +87,14 @@ class ProcessingJobLogger:
             if exc_type is None:
                 # Success
                 self.job.status = ProcessingStatus.COMPLETED
-                self.job.completed_at = datetime.now(datetime.UTC)
+                self.job.completed_at = datetime.now(timezone.utc)
                 self.job.processing_duration_seconds = processing_duration
                 log.info(f"Processing job {self.job.id} completed successfully in {processing_duration:.2f}s")
             else:
                 # Failure
                 self.job.status = ProcessingStatus.FAILED
                 self.job.error_message = str(exc_val) if exc_val else "Unknown error"
-                self.job.completed_at = datetime.now(datetime.UTC)
+                self.job.completed_at = datetime.now(timezone.utc)
                 self.job.processing_duration_seconds = processing_duration
                 log.error(f"Processing job {self.job.id} failed: {exc_val}")
             
@@ -182,7 +182,7 @@ class ProcessingJobLogger:
             
             if surrogate:
                 surrogate.usage_count += 1
-                surrogate.last_used_at = datetime.now(datetime.UTC)
+                surrogate.last_used_at = datetime.now(timezone.utc)
                 log.debug(f"Updated surrogate stats for {surrogate_name}")
             else:
                 log.warning(f"Surrogate voice {surrogate_name} not found in database")

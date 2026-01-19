@@ -12,7 +12,7 @@ Run after processing some audio files through the platform.
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -114,7 +114,7 @@ def show_todays_activity():
     
     db = get_db_session()
     try:
-        today = datetime.now(datetime.UTC).date()
+        today = datetime.now(timezone.utc).date()
         tomorrow = today + timedelta(days=1)
         
         annotations = db.query(AnnotationSurrogate).filter(

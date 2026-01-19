@@ -1,7 +1,7 @@
 import os
 import logging
 from typing import List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import uuid
 
@@ -73,7 +73,7 @@ def query_processing_history(
         
         # Filter by date range
         if days_back > 0:
-            cutoff_date = datetime.now(datetime.UTC) - timedelta(days=days_back)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
             query = query.filter(ProcessingJob.created_at >= cutoff_date)
         
         # Order and limit
@@ -125,7 +125,7 @@ def get_statistics_summary() -> Dict[str, Any]:
         failed = db.query(ProcessingJob).filter(ProcessingJob.status == ProcessingStatus.FAILED).count()
         
         # Recent stats (last 7 days)
-        week_ago = datetime.now(datetime.UTC) - timedelta(days=7)
+        week_ago = datetime.now(timezone.utc) - timedelta(days=7)
         recent_jobs = db.query(ProcessingJob).filter(ProcessingJob.created_at >= week_ago).count()
         
         # Average processing time
