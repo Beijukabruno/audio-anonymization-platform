@@ -114,7 +114,7 @@ def show_todays_activity():
     
     db = get_db_session()
     try:
-        today = datetime.utcnow().date()
+        today = datetime.now(datetime.UTC).date()
         tomorrow = today + timedelta(days=1)
         
         annotations = db.query(AnnotationSurrogate).filter(
