@@ -188,6 +188,10 @@ def anonymize_with_surrogates(
         output += surrogate
         
         # Track surrogate usage
+        # Generate database-compatible surrogate name: language_gender_label_filename
+        filename_without_ext = os.path.splitext(os.path.basename(surrogate_path))[0]
+        db_surrogate_name = f"{ann.language}_{ann.gender}_{ann.label}_{filename_without_ext}"
+        
         surrogate_usage.append({
             'start_sec': ann.start_sec,
             'end_sec': ann.end_sec,
@@ -196,7 +200,7 @@ def anonymize_with_surrogates(
             'label': ann.label,
             'language': ann.language,
             'surrogate_path': surrogate_path,
-            'surrogate_name': os.path.basename(surrogate_path),
+            'surrogate_name': db_surrogate_name,
             'surrogate_duration_ms': len(surrogate),
             'processing_strategy': strategy
         })
