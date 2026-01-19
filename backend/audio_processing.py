@@ -189,8 +189,9 @@ def anonymize_with_surrogates(
         
         # Track surrogate usage
         # Generate database-compatible surrogate name: language_gender_label_filename
+        # Note: label must be lowercase to match database initialization logic
         filename_without_ext = os.path.splitext(os.path.basename(surrogate_path))[0]
-        db_surrogate_name = f"{ann.language}_{ann.gender}_{ann.label}_{filename_without_ext}"
+        db_surrogate_name = f"{ann.language}_{ann.gender}_{ann.label.lower()}_{filename_without_ext}"
         
         surrogate_usage.append({
             'start_sec': ann.start_sec,
