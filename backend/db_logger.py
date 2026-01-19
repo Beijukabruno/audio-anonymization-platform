@@ -12,7 +12,8 @@ from .database import (
     ProcessingStatus, 
     ProcessingMethod,
     Gender,
-    SurrogateVoice
+    SurrogateVoice,
+    AnnotationSurrogate
 )
 
 log = logging.getLogger(__name__)
@@ -187,6 +188,54 @@ class ProcessingJobLogger:
                 log.warning(f"Surrogate voice {surrogate_name} not found in database")
         except Exception as e:
             log.error(f"Failed to update surrogate stats: {e}")
+    
+    def log_annotation_surrogates(self, surrogate_usage_list: list):
+        """
+        Log individual annotation surrogate usage to database.
+        
+        Args:
+            surrogate_usage_list: List of dicts with keys:
+                - start_sec, end_sec, duration_sec
+                - gender, label, language
+                - surrogate_path, surrogate_name
+                - surrogate_duration_ms, processing_strategy
+        """
+        if not self.job or not self.db:
+            log.warning("Cannot log annotation surrogates: no active job or db session")
+            return
+        
+        try:
+            for usage in surrogate_usage_list:
+                annotation_record = AnnotationSurrogate(
+                    processing_job_id=self.job.id,
+                    start_sec=usage.get('start_sec', 0.0),
+                    end_sec=usage.get('end_sec', 0.0),
+                    duration_sec=usage.get('duration_sec', 0.0),
+                    gender=usage.get('gender', 'unknown'),
+                    label=usage.get('label'),
+                    language=usage.get('language', 'english'),
+                    surrogate_name=usage.get('surrogate_name', 'unknown'),
+                    surrogate_file_path=usage.get('surrogate_path', ''),
+                    surrogate_duration_ms=usage.get('surrogate_duration_ms'),
+                    processing_strategy=usage.get('processing_strategy', 'direct'),
+                )
+                self.db.add(annotation_record)
+                
+                # Update overall job's surrogate used (use first one or most common)
+                if not self.job.surrogate_voice_used:
+                    self.job.surrogate_voice_used = usage.get('surrogate_name')
+                
+                # Update surrogate voice statistics
+                surrogate_name = usage.get('surrogate_name')
+                if surrogate_name:
+                    self._update_surrogate_stats(surrogate_name)
+            
+            self.db.commit()
+            log.info(f"Logged {len(surrogate_usage_list)} annotation surrogates for job {self.job.id}")
+            
+        except Exception as e:
+            log.error(f"Failed to log annotation surrogates: {e}")
+            self.db.rollback()
 
 
 def init_surrogate_voices(surrogates_root: str, db_session=None):
@@ -238,7 +287,7 @@ def init_surrogate_voices(surrogates_root: str, db_session=None):
                                 log.info(f"Added surrogate voice: {name}")
         
         db_session.commit()
-        log.info("✅ Surrogate voices initialized in database")
+        log.info("[OK] Surrogate voices initialized in database")
         
     except Exception as e:
         log.error(f"Failed to initialize surrogate voices: {e}")

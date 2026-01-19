@@ -223,7 +223,7 @@ def process(audio: tuple, table: List[Dict[str, Any]], output_format: str = "wav
     if not annotations:
         return None
 
-    out_bytes = anonymize_to_bytes(audio_bytes, annotations, SURROGATES_ROOT, input_format=input_format, output_format=output_format)
+    out_bytes, surrogate_usage = anonymize_to_bytes(audio_bytes, annotations, SURROGATES_ROOT, input_format=input_format, output_format=output_format)
     return (output_format, out_bytes)
 
 
@@ -410,7 +410,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
             log.info(f"Calling anonymize_to_bytes with {len(annotations_local)} annotations")
             default_params_path = os.path.join(os.path.dirname(__file__), "..", "params", "mixed_medium_alt.json")
 
-            out_bytes_local = anonymize_to_bytes(
+            out_bytes_local, surrogate_usage = anonymize_to_bytes(
                 audio_bytes,
                 annotations_local,
                 SURROGATES_ROOT,
@@ -421,6 +421,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
             )
 
             log.info(f"Anonymization complete, output size: {len(out_bytes_local)} bytes")
+            log.info(f"Surrogate usage: {len(surrogate_usage)} annotations processed")
 
             # Save to output directory with unique timestamp
             output_dir = os.path.join(os.path.dirname(__file__), "..", "output")
@@ -432,7 +433,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                 f.write(out_bytes_local)
             log.info(f"Saved anonymized audio to: {out_path}")
 
-            # Log output metadata
+            # Log output metadata and surrogate usage
             if db_logger and db_logger.job:
                 from pydub import AudioSegment as AS
                 out_audio = AS.from_file(BytesIO(out_bytes_local), format=fmt)
@@ -441,6 +442,9 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                     file_size=len(out_bytes_local),
                     duration=len(out_audio) / 1000.0,
                 )
+                
+                # Log each annotation's surrogate usage
+                db_logger.log_annotation_surrogates(surrogate_usage)
 
             return out_path
 

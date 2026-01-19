@@ -2,9 +2,9 @@
 
 import os
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, Enum, Boolean, JSON
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, Enum, Boolean, JSON, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 import enum
 
 # Database URL from environment
@@ -137,11 +137,42 @@ class DailyStatistics(Base):
         return f"<DailyStatistics(date={self.date}, total_files={self.total_files_processed})>"
 
 
+class AnnotationSurrogate(Base):
+    """Track each annotation processed with the surrogate used."""
+    
+    __tablename__ = "annotation_surrogates"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    processing_job_id = Column(Integer, ForeignKey('processing_jobs.id'), nullable=False, index=True)
+    
+    # Annotation details
+    start_sec = Column(Float, nullable=False)
+    end_sec = Column(Float, nullable=False)
+    duration_sec = Column(Float, nullable=False)
+    gender = Column(String(20), nullable=False)
+    label = Column(String(100), nullable=True)
+    language = Column(String(50), nullable=False)
+    
+    # Surrogate information
+    surrogate_name = Column(String(500), nullable=False, index=True)
+    surrogate_file_path = Column(String(1000), nullable=False)
+    surrogate_duration_ms = Column(Integer, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    # Processing strategy
+    processing_strategy = Column(String(50), nullable=True)  # 'direct' or 'fit'
+    
+    def __repr__(self):
+        return f"<AnnotationSurrogate(job_id={self.processing_job_id}, {self.start_sec:.2f}s-{self.end_sec:.2f}s, surrogate={self.surrogate_name})>"
+
+
 # Database helper functions
 def init_db():
     """Initialize database tables."""
     Base.metadata.create_all(bind=engine)
-    print("✅ Database tables created successfully")
+    print("[OK] Database tables created successfully")
 
 
 def get_db():

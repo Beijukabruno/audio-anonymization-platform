@@ -101,7 +101,8 @@ def _pick_surrogate_path(surrogates_root: str, gender: str, label: Optional[str]
     return None
 
 
-def _load_and_fit_surrogate(surrogates_root: str, gender: str, label: Optional[str], target_ms: int, sample_rate: int, language: str = "english") -> AudioSegment:
+def _load_and_fit_surrogate(surrogates_root: str, gender: str, label: Optional[str], target_ms: int, sample_rate: int, language: str = "english") -> tuple[AudioSegment, str]:
+    """Load and fit surrogate to target length. Returns (AudioSegment, file_path)."""
     path = _pick_surrogate_path(surrogates_root, gender, label, language)
     if path and os.path.exists(path):
         seg = AudioSegment.from_file(path)
@@ -117,10 +118,11 @@ def _load_and_fit_surrogate(surrogates_root: str, gender: str, label: Optional[s
         seg = seg + silence
 
     # Match channels/sample rate later via set_frame_rate and set_channels
-    return seg
+    return seg, path
 
 
-def _load_surrogate_direct(surrogates_root: str, gender: str, label: Optional[str], sample_rate: int, language: str = "english") -> AudioSegment:
+def _load_surrogate_direct(surrogates_root: str, gender: str, label: Optional[str], sample_rate: int, language: str = "english") -> tuple[AudioSegment, str]:
+    """Load surrogate without modifications. Returns (AudioSegment, file_path)."""
     path = _pick_surrogate_path(surrogates_root, gender, label, language)
     if path and os.path.exists(path):
         seg = AudioSegment.from_file(path)
@@ -128,7 +130,7 @@ def _load_surrogate_direct(surrogates_root: str, gender: str, label: Optional[st
         # No fallback: raise error if surrogate not found to ensure only real surrogates are used
         raise ValueError(f"No surrogate found for gender={gender}, label={label}, language={language}. Please add surrogate files to data/surrogates/{language}/{gender}/{label}/")
     # Normalize format to input sample rate/channels later; do not pad/trim/fade.
-    return seg
+    return seg, path
 
 
 def anonymize_with_surrogates(
@@ -136,10 +138,11 @@ def anonymize_with_surrogates(
     annotations: List[Annotation],
     surrogates_root: str,
     strategy: str = "direct",  # 'direct' (no trim/pad/fade) or 'fit'
-) -> AudioSegment:
+) -> tuple[AudioSegment, List[dict]]:
     """
     Replace annotated time ranges with surrogate clips selected by gender.
     Assumes annotations are in seconds; handles overlap by merging first.
+    Returns (processed_audio, surrogate_usage_list)
     """
     log.info(f"anonymize_with_surrogates called with {len(annotations)} annotations")
     for i, ann in enumerate(annotations):
@@ -148,7 +151,7 @@ def anonymize_with_surrogates(
     annots = normalize_annotations(annotations)
     if not annots:
         log.info("   No valid annotations after normalization")
-        return input_audio
+        return input_audio, []
     
     log.info(f"   After normalization: {len(annots)} annotations")
 
@@ -158,6 +161,7 @@ def anonymize_with_surrogates(
     # Build output by stitching original segments + surrogate replacements
     output = AudioSegment.empty()
     cursor_ms = 0
+    surrogate_usage = []  # Track surrogate usage for each annotation
 
     for i, ann in enumerate(annots):
         start_ms = int(ann.start_sec * 1000)
@@ -175,12 +179,27 @@ def anonymize_with_surrogates(
 
         # Append surrogate according to strategy
         if strategy == "fit":
-            surrogate = _load_and_fit_surrogate(surrogates_root, ann.gender, ann.label, target_ms, sr, ann.language)
+            surrogate, surrogate_path = _load_and_fit_surrogate(surrogates_root, ann.gender, ann.label, target_ms, sr, ann.language)
         else:
-            surrogate = _load_surrogate_direct(surrogates_root, ann.gender, ann.label, sr, ann.language)
+            surrogate, surrogate_path = _load_surrogate_direct(surrogates_root, ann.gender, ann.label, sr, ann.language)
+        
         surrogate = surrogate.set_frame_rate(sr).set_channels(ch)
-        log.info(f"      Loaded surrogate: {len(surrogate)}ms")
+        log.info(f"      Loaded surrogate: {len(surrogate)}ms from {surrogate_path}")
         output += surrogate
+        
+        # Track surrogate usage
+        surrogate_usage.append({
+            'start_sec': ann.start_sec,
+            'end_sec': ann.end_sec,
+            'duration_sec': ann.end_sec - ann.start_sec,
+            'gender': ann.gender,
+            'label': ann.label,
+            'language': ann.language,
+            'surrogate_path': surrogate_path,
+            'surrogate_name': os.path.basename(surrogate_path),
+            'surrogate_duration_ms': len(surrogate),
+            'processing_strategy': strategy
+        })
 
         cursor_ms = end_ms
 
@@ -188,7 +207,7 @@ def anonymize_with_surrogates(
     if cursor_ms < len(input_audio):
         output += input_audio[cursor_ms:]
 
-    return output
+    return output, surrogate_usage
 
 
 def anonymize_file(
@@ -198,14 +217,15 @@ def anonymize_file(
     output_path: Optional[str] = None,
     output_format: str = "wav",
     strategy: str = "direct",
-) -> str:
+) -> tuple[str, List[dict]]:
+    """Anonymize audio file and return (output_path, surrogate_usage_list)."""
     audio = load_audio(input_path)
-    output = anonymize_with_surrogates(audio, annotations, surrogates_root, strategy=strategy)
+    output, surrogate_usage = anonymize_with_surrogates(audio, annotations, surrogates_root, strategy=strategy)
     if not output_path:
         base, _ = os.path.splitext(os.path.basename(input_path))
         output_path = os.path.join(os.path.dirname(input_path), f"{base}.anonymized.{output_format}")
     save_audio(output, output_path, format=output_format)
-    return output_path
+    return output_path, surrogate_usage
 
 
 def apply_voice_modifications(audio: AudioSegment, params: dict) -> AudioSegment:
@@ -335,12 +355,13 @@ def anonymize_to_bytes(
     output_format: str = "wav",
     strategy: str = "direct",
     params_file: str = None,
-) -> bytes:
+) -> tuple[bytes, List[dict]]:
+    """Anonymize audio from bytes and return (output_bytes, surrogate_usage_list)."""
     buf = BytesIO(input_bytes)
     audio = AudioSegment.from_file(buf, format=input_format)
     
     # Step 1: Surrogate replacement
-    output = anonymize_with_surrogates(audio, annotations, surrogates_root, strategy=strategy)
+    output, surrogate_usage = anonymize_with_surrogates(audio, annotations, surrogates_root, strategy=strategy)
     
     # Step 2: Apply voice modifications
     if params_file:
@@ -349,4 +370,4 @@ def anonymize_to_bytes(
     
     out_buf = BytesIO()
     output.export(out_buf, format=output_format)
-    return out_buf.getvalue()
+    return out_buf.getvalue(), surrogate_usage

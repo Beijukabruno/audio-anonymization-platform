@@ -28,3 +28,10 @@ output/
 uploads/
 *.log
 .env
+
+# Audio files
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
