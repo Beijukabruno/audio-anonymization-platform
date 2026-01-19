@@ -245,15 +245,26 @@ def apply_voice_modifications(audio: AudioSegment, params: dict) -> AudioSegment
         return audio
     
     # Import anonymize function from scripts/optimize.py
-    scripts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    # Try multiple paths to handle different execution contexts (dev, docker, etc.)
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(backend_dir)
+    scripts_dir = os.path.join(project_root, "scripts")
+    
+    log.info(f"Attempting to import from scripts directory: {scripts_dir}")
+    
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     
     try:
         from optimize import anonymize as anonymize_fn
         log.info("Successfully imported anonymize function from scripts/optimize.py")
     except ImportError as e:
-        log.warning(f"Failed to import anonymize function: {e}. Returning original audio.")
+        log.warning(f"Failed to import anonymize function: {e}")
+        log.warning(f"Scripts directory: {scripts_dir}, exists: {os.path.exists(scripts_dir)}")
+        log.warning(f"sys.path: {sys.path[:5]}")  # Show first 5 entries
+        log.warning("Returning original audio without voice modifications.")
         return audio
 
     try:

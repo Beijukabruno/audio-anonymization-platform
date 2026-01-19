@@ -19,6 +19,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app/ ./app/
 COPY backend/ ./backend/
+COPY scripts/ ./scripts/
+COPY params/ ./params/
 COPY data/ ./data/
 COPY entrypoint.sh .
 
