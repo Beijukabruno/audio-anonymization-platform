@@ -12,34 +12,17 @@ import argparse
 import json
 import os
 import sys
-import importlib
 import numpy as np
 import soundfile as sf
 from glob import glob
 
-# Resolve anonymize() from vclm.voice_modification first; fall back to scripts.optimize
+# Add the scripts directory to sys.path to import optimize module
+scripts_dir = os.path.dirname(os.path.abspath(__file__))
+if scripts_dir not in sys.path:
+    sys.path.insert(0, scripts_dir)
 
-def _resolve_anonymize_fn():
-    base = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    for path in [os.path.join(base, "vclm"), os.path.join(base, "scripts"), base]:
-        if path not in sys.path:
-            sys.path.insert(0, path)
-
-    candidates = [
-        ("vclm.voice_modification", "anonymize"),
-        ("scripts.optimize", "anonymize"),
-        ("optimize", "anonymize"),
-        ("voice_modification", "anonymize"),
-    ]
-    for mod_name, attr in candidates:
-        try:
-            mod = importlib.import_module(mod_name)
-            fn = getattr(mod, attr, None)
-            if callable(fn):
-                return fn
-        except Exception:
-            continue
-    raise ImportError("Could not resolve anonymize() function from available modules")
+# Import anonymize function from optimize module
+from optimize import anonymize
 
 
 def process_audio_file(input_path, output_path, anonymize_fn, params):
@@ -82,7 +65,6 @@ def main():
         raise FileNotFoundError(f"Params JSON not found: {args.params}")
 
     params = json.load(open(args.params, "r"))
-    anonymize_fn = _resolve_anonymize_fn()
 
     # Single file mode
     if args.wav:
@@ -90,12 +72,16 @@ def main():
             raise FileNotFoundError(f"Input WAV not found: {args.wav}")
         
         output_path = args.out or "modified.wav"
-        process_audio_file(args.wav, output_path, anonymize_fn, params)
+        process_audio_file(args.wav, output_path, anonymize, params)
         
     # Folder batch mode
     else:
         if not os.path.isdir(args.folder):
             raise FileNotFoundError(f"Input folder not found: {args.folder}")
+        
+        # Create output directory
+        output_dir = os.path.join(args.folder, "anonymized")
+        os.makedirs(output_dir, exist_ok=True)
         
         # Find all audio files
         audio_extensions = ['*.wav', '*.WAV', '*.mp3', '*.flac', '*.ogg', '*.m4a']
@@ -108,16 +94,17 @@ def main():
             return
         
         print(f"Found {len(audio_files)} audio file(s) in {args.folder}")
+        print(f"Output directory: {output_dir}")
         
         # Process each file
         for input_path in audio_files:
             basename = os.path.basename(input_path)
             name_without_ext = os.path.splitext(basename)[0]
-            output_filename = f"anonymisation_{name_without_ext}.wav"
-            output_path = os.path.join(args.folder, output_filename)
+            output_filename = f"{name_without_ext}.wav"
+            output_path = os.path.join(output_dir, output_filename)
             
             try:
-                process_audio_file(input_path, output_path, anonymize_fn, params)
+                process_audio_file(input_path, output_path, anonymize, params)
             except Exception as e:
                 print(f"  ✗ Error processing {basename}: {e}")
                 continue

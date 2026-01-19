@@ -253,6 +253,12 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
             label="Output Format",
             scale=1
         )
+        voice_mod_params = gr.Dropdown(
+            choices=["mixed_medium_alt.json", "None"],
+            value="mixed_medium_alt.json",
+            label="Voice Modification Parameters",
+            scale=2
+        )
 
     gr.Markdown("## Add Annotations")
     with gr.Row():
@@ -332,10 +338,11 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
         outputs=[table, status_msg],
     )
 
-    def run(audio, table_data, fmt):
+    def run(audio, table_data, fmt, voice_mod_params_selected):
         """Process audio with annotations (with database logging)."""
         log.info("=== Starting anonymization process ===")
         log.info(f"Output format: {fmt}")
+        log.info(f"Voice modification params: {voice_mod_params_selected}")
         
         if audio is None:
             log.warning("No audio provided")
@@ -408,7 +415,15 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
 
         def _process_and_save(db_logger=None):
             log.info(f"Calling anonymize_to_bytes with {len(annotations_local)} annotations")
-            default_params_path = os.path.join(os.path.dirname(__file__), "..", "params", "mixed_medium_alt.json")
+            
+            # Determine params file path
+            params_path = None
+            if voice_mod_params_selected and voice_mod_params_selected != "None":
+                params_path = os.path.join(os.path.dirname(__file__), "..", "params", voice_mod_params_selected)
+                log.info(f"Using voice modification parameters: {params_path}")
+            else:
+                log.info("No voice modification parameters selected")
+                log.info("No voice modification parameters selected")
 
             out_bytes_local, surrogate_usage = anonymize_to_bytes(
                 audio_bytes,
@@ -417,7 +432,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                 input_format=input_format_local,
                 output_format=fmt,
                 strategy="direct",
-                params_file=default_params_path,
+                params_file=params_path,
             )
 
             log.info(f"Anonymization complete, output size: {len(out_bytes_local)} bytes")
@@ -479,7 +494,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
 
     anonymize_btn.click(
         run,
-        inputs=[audio_in, table, output_format],
+        inputs=[audio_in, table, output_format, voice_mod_params],
         outputs=audio_out,
     )
 

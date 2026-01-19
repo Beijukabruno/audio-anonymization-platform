@@ -244,34 +244,16 @@ def apply_voice_modifications(audio: AudioSegment, params: dict) -> AudioSegment
         log.info("No voice modification parameters provided")
         return audio
     
-    def _resolve_anonymize_fn():
-        base = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        for path in [os.path.join(base, "vclm"), os.path.join(base, "scripts"), base]:
-            if path not in sys.path:
-                sys.path.insert(0, path)
-
-        candidates = [
-            ("vclm.voice_modification", "anonymize"),
-            ("scripts.voice_modification", "anonymize"),
-            ("vclm.optimize", "anonymize"),
-            ("scripts.optimize", "anonymize"),
-            ("voice_modification", "anonymize"),
-            ("optimize", "anonymize"),
-        ]
-
-        for mod_name, attr in candidates:
-            try:
-                mod = importlib.import_module(mod_name)
-                fn = getattr(mod, attr, None)
-                if callable(fn):
-                    return fn
-            except Exception:
-                continue
-        return None
-
-    anonymize_fn = _resolve_anonymize_fn()
-    if anonymize_fn is None:
-        log.warning("Failed to resolve anonymize() function. Returning original audio.")
+    # Import anonymize function from scripts/optimize.py
+    scripts_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts"))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    
+    try:
+        from optimize import anonymize as anonymize_fn
+        log.info("Successfully imported anonymize function from scripts/optimize.py")
+    except ImportError as e:
+        log.warning(f"Failed to import anonymize function: {e}. Returning original audio.")
         return audio
 
     try:
