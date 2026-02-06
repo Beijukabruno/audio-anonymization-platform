@@ -47,11 +47,15 @@ if [ -n "${DATABASE_URL:-}" ]; then
     
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
         if python3 -c "from backend.database import engine; engine.connect()" 2>/dev/null; then
-            echo "✅ Database connection successful"
+            echo "Database connection successful"
             
             # Initialize database tables
             echo "Initializing database tables..."
-            python3 -c "from backend.database import init_db; init_db()" || echo "⚠️ Database init failed, continuing anyway"
+            python3 -c "from backend.database import init_db; init_db()" || echo "WARNING: Database init failed, continuing anyway"
+
+            # Run migrations (idempotent)
+            echo "Running database migrations..."
+            python3 backend/migrations.py || echo "WARNING: Database migrations failed, continuing anyway"
             
             break
         else
@@ -62,7 +66,7 @@ if [ -n "${DATABASE_URL:-}" ]; then
     done
     
     if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-        echo "⚠️ WARNING: Could not connect to database after $MAX_RETRIES attempts"
+        echo "WARNING: Could not connect to database after $MAX_RETRIES attempts"
         echo "   Application will start without database logging"
     fi
 else

@@ -35,13 +35,13 @@ def migrate_add_annotation_surrogate_table():
             exists = result.scalar()
             
             if exists:
-                log.info("[OK] AnnotationSurrogate table already exists, skipping creation")
+                log.info("AnnotationSurrogate table already exists, skipping creation")
                 return True
         
         # Create the table
         log.info("Creating AnnotationSurrogate table...")
         AnnotationSurrogate.__table__.create(engine, checkfirst=True)
-        log.info("[OK] AnnotationSurrogate table created successfully")
+        log.info("AnnotationSurrogate table created successfully")
         
         # Verify table was created
         with engine.connect() as conn:
@@ -59,7 +59,54 @@ def migrate_add_annotation_surrogate_table():
         return True
         
     except Exception as e:
-        log.error(f"[ERROR] Migration failed: {e}")
+        log.error(f"Migration failed: {e}")
+        return False
+
+
+def _column_exists(conn, table_name: str, column_name: str) -> bool:
+    result = conn.execute(text(
+        """
+        SELECT EXISTS (
+            SELECT FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = :table_name
+              AND column_name = :column_name
+        );
+        """
+    ), {"table_name": table_name, "column_name": column_name})
+    return bool(result.scalar())
+
+
+def _add_column_if_missing(conn, table_name: str, column_name: str, column_sql: str) -> None:
+    if _column_exists(conn, table_name, column_name):
+        log.info(f"{table_name}.{column_name} already exists, skipping")
+        return
+    log.info(f"Adding {table_name}.{column_name}")
+    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}"))
+
+
+def migrate_add_audio_file_hash_columns():
+    """Add audio_file_hash columns for inter-user tracking."""
+    log.info("Starting migration: Adding audio_file_hash columns")
+
+    try:
+        with engine.begin() as conn:
+            _add_column_if_missing(
+                conn,
+                "annotation_surrogates",
+                "audio_file_hash",
+                "audio_file_hash VARCHAR(64) NULL"
+            )
+            _add_column_if_missing(
+                conn,
+                "processing_jobs",
+                "audio_file_hash",
+                "audio_file_hash VARCHAR(64) NULL"
+            )
+        log.info("audio_file_hash column migration completed")
+        return True
+    except Exception as e:
+        log.error(f"audio_file_hash migration failed: {e}")
         return False
 
 
@@ -70,14 +117,16 @@ def migrate_all():
     log.info("=" * 60)
     
     success = migrate_add_annotation_surrogate_table()
+    if success:
+        success = migrate_add_audio_file_hash_columns()
     
     if success:
         log.info("=" * 60)
-        log.info("[SUCCESS] All migrations completed successfully")
+        log.info("All migrations completed successfully")
         log.info("=" * 60)
     else:
         log.error("=" * 60)
-        log.error("[FAILED] Some migrations failed")
+        log.error("Some migrations failed")
         log.error("=" * 60)
     
     return success
@@ -97,6 +146,6 @@ if __name__ == "__main__":
     if args.init_all:
         log.info("Initializing all database tables...")
         Base.metadata.create_all(bind=engine)
-        log.info("✅ All tables initialized")
+        log.info("All tables initialized")
     else:
         migrate_all()
