@@ -21,6 +21,7 @@ logging.basicConfig(
 )
 
 SUPPORTED_INPUT_FORMATS = {"wav", "mp3", "flac", "ogg", "m4a"}
+DISABLE_VOICE_MOD = os.getenv("DISABLE_VOICE_MOD", "0") == "1"
 
 
 def load_audio(file_path: str) -> AudioSegment:
@@ -362,9 +363,11 @@ def anonymize_to_bytes(
     output, surrogate_usage = anonymize_with_surrogates(audio, annotations, surrogates_root, strategy=strategy)
     
     # Step 2: Apply voice modifications
+    # Temporarily disabled for troubleshooting per request.
     if params_file:
-        params = load_voice_modification_params(params_file)
-        output = apply_voice_modifications(output, params)
+        log.info("Voice modification is commented out for troubleshooting; skipping.")
+        # params = load_voice_modification_params(params_file)
+        # output = apply_voice_modifications(output, params)
     
     out_buf = BytesIO()
     output.export(out_buf, format=output_format)

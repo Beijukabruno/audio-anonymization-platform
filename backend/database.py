@@ -1,7 +1,7 @@
 """Database models and connection management for audio anonymization platform."""
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, Enum, Boolean, JSON, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -46,7 +46,7 @@ class ProcessingJob(Base):
     __tablename__ = "processing_jobs"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     completed_at = Column(DateTime, nullable=True)
     
     # User/Session info
@@ -99,7 +99,7 @@ class SurrogateVoice(Base):
     last_used_at = Column(DateTime, nullable=True)
     
     # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     
     def __repr__(self):
@@ -145,6 +145,9 @@ class AnnotationSurrogate(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     processing_job_id = Column(Integer, ForeignKey('processing_jobs.id'), nullable=False, index=True)
     
+    # Audio file identifier
+    audio_file_hash = Column(String(64), nullable=True, index=True)  # MD5 or SHA256 of original file
+    
     # Annotation details
     start_sec = Column(Float, nullable=False)
     end_sec = Column(Float, nullable=False)
@@ -159,13 +162,68 @@ class AnnotationSurrogate(Base):
     surrogate_duration_ms = Column(Integer, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
     
     # Processing strategy
     processing_strategy = Column(String(50), nullable=True)  # 'direct' or 'fit'
     
     def __repr__(self):
         return f"<AnnotationSurrogate(job_id={self.processing_job_id}, {self.start_sec:.2f}s-{self.end_sec:.2f}s, surrogate={self.surrogate_name})>"
+
+
+class UserAnnotationAgreement(Base):
+    """Track inter-user annotation agreements/disagreements on same audio segments.
+    
+    This table stores comparisons between annotations from different users
+    on the same audio file and time segment.
+    """
+    
+    __tablename__ = "user_annotation_agreements"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    
+    # Audio file being annotated
+    audio_file_hash = Column(String(64), nullable=False, index=True)
+    audio_filename = Column(String(500), nullable=False)
+    
+    # The time segment that was annotated
+    segment_start_sec = Column(Float, nullable=False)
+    segment_end_sec = Column(Float, nullable=False)
+    
+    # User 1 information
+    user1_session_id = Column(String(255), nullable=False, index=True)
+    user1_processing_job_id = Column(Integer, ForeignKey('processing_jobs.id'), nullable=False)
+    user1_annotation_id = Column(Integer, ForeignKey('annotation_surrogates.id'), nullable=True)
+    user1_gender = Column(String(20), nullable=True)
+    user1_label = Column(String(100), nullable=True)
+    user1_surrogate = Column(String(500), nullable=True)
+    user1_annotation_time = Column(DateTime, nullable=True)
+    
+    # User 2 information
+    user2_session_id = Column(String(255), nullable=False, index=True)
+    user2_processing_job_id = Column(Integer, ForeignKey('processing_jobs.id'), nullable=False)
+    user2_annotation_id = Column(Integer, ForeignKey('annotation_surrogates.id'), nullable=True)
+    user2_gender = Column(String(20), nullable=True)
+    user2_label = Column(String(100), nullable=True)
+    user2_surrogate = Column(String(500), nullable=True)
+    user2_annotation_time = Column(DateTime, nullable=True)
+    
+    # Agreement metrics
+    gender_match = Column(Boolean, nullable=True)  # True if both users chose same gender
+    label_match = Column(Boolean, nullable=True)   # True if both users chose same label
+    surrogate_match = Column(Boolean, nullable=True)  # True if same surrogate was used
+    time_overlap_percent = Column(Float, nullable=True)  # How much time ranges overlap (0-100)
+    
+    # Overall agreement assessment
+    agreement_level = Column(String(20), nullable=True)  # 'complete', 'partial', 'none'
+    notes = Column(Text, nullable=True)
+    
+    # Metadata
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    reviewed = Column(Boolean, default=False, nullable=False)
+    
+    def __repr__(self):
+        return f"<UserAnnotationAgreement(audio={self.audio_filename}, segment={self.segment_start_sec:.1f}s-{self.segment_end_sec:.1f}s, agreement={self.agreement_level})>"
 
 
 # Database helper functions
@@ -187,6 +245,221 @@ def get_db():
 def get_db_session():
     """Get a database session (for non-context manager usage)."""
     return SessionLocal()
+
+
+def compare_user_annotations(db, audio_file_hash: str, audio_filename: str):
+    """
+    Compare annotations from different users on the same audio file.
+    
+    Args:
+        db: Database session
+        audio_file_hash: Hash of audio file (for identification)
+        audio_filename: Original filename
+    
+    Returns:
+        List of UserAnnotationAgreement records
+    """
+    # Find all annotations for this audio file
+    annotations = db.query(AnnotationSurrogate).filter_by(
+        audio_file_hash=audio_file_hash
+    ).all()
+    
+    agreements = []
+    
+    # Compare each pair of annotations from different users
+    for i, ann1 in enumerate(annotations):
+        job1 = db.query(ProcessingJob).filter_by(id=ann1.processing_job_id).first()
+        
+        for ann2 in annotations[i+1:]:
+            job2 = db.query(ProcessingJob).filter_by(id=ann2.processing_job_id).first()
+            
+            # Different users?
+            if job1.user_session_id == job2.user_session_id:
+                continue
+            
+            # Same or overlapping time segment?
+            time_overlap = max(0, min(ann1.end_sec, ann2.end_sec) - max(ann1.start_sec, ann2.start_sec))
+            total_time = max(ann1.end_sec, ann2.end_sec) - min(ann1.start_sec, ann2.start_sec)
+            overlap_percent = (time_overlap / total_time * 100) if total_time > 0 else 0
+            
+            if overlap_percent < 20:  # Less than 20% overlap, skip
+                continue
+            
+            # Check agreement
+            gender_match = ann1.gender == ann2.gender
+            label_match = ann1.label == ann2.label
+            surrogate_match = ann1.surrogate_name == ann2.surrogate_name
+            
+            # Determine overall agreement level
+            if gender_match and label_match and surrogate_match:
+                agreement_level = "complete"
+            elif gender_match and label_match:
+                agreement_level = "partial"
+            else:
+                agreement_level = "none"
+            
+            # Create agreement record
+            agreement = UserAnnotationAgreement(
+                audio_file_hash=audio_file_hash,
+                audio_filename=audio_filename,
+                segment_start_sec=min(ann1.start_sec, ann2.start_sec),
+                segment_end_sec=max(ann1.end_sec, ann2.end_sec),
+                
+                user1_session_id=job1.user_session_id,
+                user1_processing_job_id=job1.id,
+                user1_annotation_id=ann1.id,
+                user1_gender=ann1.gender,
+                user1_label=ann1.label,
+                user1_surrogate=ann1.surrogate_name,
+                user1_annotation_time=ann1.created_at,
+                
+                user2_session_id=job2.user_session_id,
+                user2_processing_job_id=job2.id,
+                user2_annotation_id=ann2.id,
+                user2_gender=ann2.gender,
+                user2_label=ann2.label,
+                user2_surrogate=ann2.surrogate_name,
+                user2_annotation_time=ann2.created_at,
+                
+                gender_match=gender_match,
+                label_match=label_match,
+                surrogate_match=surrogate_match,
+                time_overlap_percent=overlap_percent,
+                agreement_level=agreement_level,
+            )
+            
+            agreements.append(agreement)
+    
+    return agreements
+
+
+def get_agreement_summary_for_audio(db, audio_file_hash: str) -> dict:
+    """
+    Get summary statistics for inter-user agreement on an audio file.
+    
+    Args:
+        db: Database session
+        audio_file_hash: Hash of audio file
+    
+    Returns:
+        Dictionary with agreement metrics
+    """
+    agreements = db.query(UserAnnotationAgreement).filter_by(
+        audio_file_hash=audio_file_hash
+    ).all()
+    
+    if not agreements:
+        return {
+            "total_comparisons": 0,
+            "complete_agreement": 0,
+            "partial_agreement": 0,
+            "no_agreement": 0,
+            "complete_percent": 0,
+            "avg_overlap_percent": 0,
+        }
+    
+    complete = sum(1 for a in agreements if a.agreement_level == "complete")
+    partial = sum(1 for a in agreements if a.agreement_level == "partial")
+    none = sum(1 for a in agreements if a.agreement_level == "none")
+    avg_overlap = sum(a.time_overlap_percent for a in agreements) / len(agreements)
+    
+    return {
+        "total_comparisons": len(agreements),
+        "complete_agreement": complete,
+        "partial_agreement": partial,
+        "no_agreement": none,
+        "complete_percent": round(complete / len(agreements) * 100, 2),
+        "avg_overlap_percent": round(avg_overlap, 2),
+    }
+
+
+def get_all_user_pairs_for_audio(db, audio_file_hash: str) -> list:
+    """
+    Get all unique user pairs who annotated the same audio file.
+    
+    Args:
+        db: Database session
+        audio_file_hash: Hash of audio file
+    
+    Returns:
+        List of (user1_session_id, user2_session_id, agreement_count, complete_count)
+    """
+    agreements = db.query(UserAnnotationAgreement).filter_by(
+        audio_file_hash=audio_file_hash
+    ).all()
+    
+    # Group by user pairs
+    user_pairs = {}
+    for agreement in agreements:
+        # Sort user IDs to avoid duplicate pairs (u1:u2 vs u2:u1)
+        users = tuple(sorted([agreement.user1_session_id, agreement.user2_session_id]))
+        
+        if users not in user_pairs:
+            user_pairs[users] = {"total": 0, "complete": 0}
+        
+        user_pairs[users]["total"] += 1
+        if agreement.agreement_level == "complete":
+            user_pairs[users]["complete"] += 1
+    
+    # Return as list of tuples with agreement metrics
+    result = []
+    for (user1, user2), counts in user_pairs.items():
+        result.append({
+            "user1": user1,
+            "user2": user2,
+            "total_comparisons": counts["total"],
+            "complete_agreement": counts["complete"],
+            "agreement_percent": round(counts["complete"] / counts["total"] * 100, 2),
+        })
+    
+    return result
+
+
+def get_user_annotations_for_audio(db, audio_file_hash: str, user_session_id: str) -> list:
+    """
+    Get all annotations from a specific user for an audio file.
+    
+    Args:
+        db: Database session
+        audio_file_hash: Hash of audio file
+        user_session_id: User session identifier
+    
+    Returns:
+        List of AnnotationSurrogate records
+    """
+    # Find all ProcessingJob records for this user
+    user_jobs = db.query(ProcessingJob).filter_by(
+        user_session_id=user_session_id
+    ).all()
+    
+    job_ids = [job.id for job in user_jobs]
+    
+    # Find all annotations by this user for this audio file
+    annotations = db.query(AnnotationSurrogate).filter(
+        AnnotationSurrogate.processing_job_id.in_(job_ids),
+        AnnotationSurrogate.audio_file_hash == audio_file_hash,
+    ).all()
+    
+    return annotations
+
+
+def get_disagreement_segments_for_audio(db, audio_file_hash: str) -> list:
+    """
+    Get all segments where users disagreed on annotations.
+    
+    Args:
+        db: Database session
+        audio_file_hash: Hash of audio file
+    
+    Returns:
+        List of disagreement records with segment details
+    """
+    disagreements = db.query(UserAnnotationAgreement).filter(
+        UserAnnotationAgreement.audio_file_hash == audio_file_hash,
+        UserAnnotationAgreement.agreement_level != "complete",
+    ).all()
+    
+    return disagreements
 
 
 if __name__ == "__main__":

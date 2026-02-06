@@ -423,7 +423,6 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                 log.info(f"Using voice modification parameters: {params_path}")
             else:
                 log.info("No voice modification parameters selected")
-                log.info("No voice modification parameters selected")
 
             out_bytes_local, surrogate_usage = anonymize_to_bytes(
                 audio_bytes,

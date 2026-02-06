@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 import optuna as op
 import copy
+import time
+import logging
+import numpy as np
 
 # multiprocess
 from joblib import Parallel, delayed
@@ -11,6 +14,8 @@ import soundfile as sf
 from pathlib import Path
 import shutil
 import json
+
+logger = logging.getLogger(__name__)
 
 # objective functions (ASR)
 def loss_asr(lst_fn):
@@ -62,10 +67,26 @@ def anonymize(x, fs = 16000, **kwargs):
     "chorus": chorus
   }
 
+  logger.info(f"=== anonymize() function START ===")
+  logger.info(f"Input audio shape: {np.array(x).shape}, fs: {fs}")
+  logger.info(f"Parameters to apply: {list(kwargs.keys())}")
+  
   y = copy.deepcopy(x)
   for k, v in kwargs.items(): # cascaded modules
-    y = module[k](y, v) if k != "resamp" else module[k](y, v, fs = fs)
-
+    logger.info(f"\n--- Applying: {k} (value={v}) ---")
+    step_start = time.time()
+    
+    if k != "resamp":
+      y = module[k](y, v)
+    else:
+      logger.info(f"Calling resampling with factor={v}, fs={fs}")
+      y = module[k](y, v, fs = fs)
+    
+    step_elapsed = time.time() - step_start
+    logger.info(f"✓ {k} completed in {step_elapsed:.2f}s")
+    logger.info(f"  Output shape: {np.array(y).shape}")
+  
+  logger.info(f"\n=== anonymize() function END ===")
   return y
 
 def objective(trial, params, wav, weight_asv = 1.0, fs = 16000, n_jobs = -1, tempdir = "temp"):

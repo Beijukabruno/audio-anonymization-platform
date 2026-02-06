@@ -11,7 +11,7 @@ docker-compose up -d postgres
 python backend/migrations.py
 ```
 
-## 📊 View Tracking Data
+##  View Tracking Data
 
 ```bash
 # View everything
@@ -108,7 +108,7 @@ WHERE DATE(created_at) = CURRENT_DATE;
 4. **Quality Control**: Verify surrogate selection
 5. **Debugging**: Trace issues to specific files
 
-## ⚙️ How It Works
+## ⚙ How It Works
 
 1. User uploads audio and adds annotations in Gradio UI
 2. `anonymize_to_bytes()` processes each annotation

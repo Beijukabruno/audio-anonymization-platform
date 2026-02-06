@@ -89,7 +89,7 @@ docker run -d \
 
 ---
 
-## ☁️ Cloud Deployment Options
+## ☁ Cloud Deployment Options
 
 ### Option 1: Hugging Face Spaces (Recommended for Gradio)
 
@@ -226,7 +226,7 @@ docker run -d \
 
 ---
 
-## 📊 Monitoring
+##  Monitoring
 
 ### Docker Logs
 ```bash
@@ -250,7 +250,7 @@ healthcheck:
 
 ---
 
-## 🚀 Performance Tips
+##  Performance Tips
 
 1. **Surrogate file organization**:
    - Use compressed formats (MP3 @ 128kbps) for smaller file sizes

@@ -29,6 +29,7 @@ class ProcessingJobLogger:
         parameters: Optional[Dict[str, Any]] = None,
         user_session_id: Optional[str] = None,
         user_ip: Optional[str] = None,
+        audio_file_hash: Optional[str] = None,
     ):
         self.db = None
         self.job = None
@@ -38,6 +39,7 @@ class ProcessingJobLogger:
         self.parameters = parameters or {}
         self.user_session_id = user_session_id
         self.user_ip = user_ip
+        self.audio_file_hash = audio_file_hash
     
     def __enter__(self):
         """Start logging the processing job."""
@@ -189,7 +191,7 @@ class ProcessingJobLogger:
         except Exception as e:
             log.error(f"Failed to update surrogate stats: {e}")
     
-    def log_annotation_surrogates(self, surrogate_usage_list: list):
+    def log_annotation_surrogates(self, surrogate_usage_list: list, audio_file_hash: Optional[str] = None):
         """
         Log individual annotation surrogate usage to database.
         
@@ -199,6 +201,7 @@ class ProcessingJobLogger:
                 - gender, label, language
                 - surrogate_path, surrogate_name
                 - surrogate_duration_ms, processing_strategy
+            audio_file_hash: Hash of original audio file (for inter-user tracking)
         """
         if not self.job or not self.db:
             log.warning("Cannot log annotation surrogates: no active job or db session")
@@ -208,6 +211,7 @@ class ProcessingJobLogger:
             for usage in surrogate_usage_list:
                 annotation_record = AnnotationSurrogate(
                     processing_job_id=self.job.id,
+                    audio_file_hash=audio_file_hash,  # Store hash for inter-user tracking
                     start_sec=usage.get('start_sec', 0.0),
                     end_sec=usage.get('end_sec', 0.0),
                     duration_sec=usage.get('duration_sec', 0.0),
@@ -232,6 +236,16 @@ class ProcessingJobLogger:
             
             self.db.commit()
             log.info(f"Logged {len(surrogate_usage_list)} annotation surrogates for job {self.job.id}")
+            
+            # If multiple users have annotated this file, trigger inter-user comparison
+            if audio_file_hash:
+                try:
+                    from .database import compare_user_annotations
+                    agreements = compare_user_annotations(self.db, audio_file_hash, self.original_filename)
+                    if agreements:
+                        log.info(f"Generated {len(agreements)} inter-user agreement comparisons for {audio_file_hash}")
+                except Exception as e:
+                    log.debug(f"Could not generate inter-user comparisons: {e}")
             
         except Exception as e:
             log.error(f"Failed to log annotation surrogates: {e}")
@@ -267,7 +281,7 @@ def init_surrogate_voices(surrogates_root: str, db_session=None):
                     # List audio files
                     for filename in os.listdir(label_path):
                         if filename.lower().endswith(('.wav', '.mp3', '.flac', '.ogg', '.m4a')):
-                            name = f"{language}_{gender}_{label}_{os.path.splitext(filename)[0]}"
+                            name = f"{language}_{gender}_{label.lower()}_{os.path.splitext(filename)[0]}"
                             file_path = os.path.join(label_path, filename)
                             
                             # Check if already exists
