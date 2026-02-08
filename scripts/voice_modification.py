@@ -179,7 +179,7 @@ def vp_baseline2(x, mcadams = 0.8, winlen = int(20 * 0.001 * 16000), shift = int
     # windowed mth frame (other than rectangular window)
     frame = x2[index]*win 
     # get lpc coefficients
-    a_lpc = lpc(frame+eps, lp_order)  # Use scipy.signal.lpc instead of librosa
+    a_lpc = librosa.lpc(frame+eps, order=lp_order)
     # get poles
     poles = scipy.signal.tf2zpk(np.array([1]), a_lpc)[1]
     #index of imaginary poles
