@@ -363,11 +363,10 @@ def anonymize_to_bytes(
     output, surrogate_usage = anonymize_with_surrogates(audio, annotations, surrogates_root, strategy=strategy)
     
     # Step 2: Apply voice modifications
-    # Temporarily disabled for troubleshooting per request.
     if params_file:
-        log.info("Voice modification is commented out for troubleshooting; skipping.")
-        # params = load_voice_modification_params(params_file)
-        # output = apply_voice_modifications(output, params)
+        log.info(f"Applying voice modifications from: {params_file}")
+        params = load_voice_modification_params(params_file)
+        output = apply_voice_modifications(output, params)
     
     out_buf = BytesIO()
     output.export(out_buf, format=output_format)
