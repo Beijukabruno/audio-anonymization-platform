@@ -1,5 +1,6 @@
 import os
 import logging
+import hashlib
 from typing import List, Dict, Any
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -42,6 +43,33 @@ SUPPORTED_LANGUAGES = ["english"]
 
 # Generate a session ID for this instance
 SESSION_ID = str(uuid.uuid4())
+
+# Scan params directory for voice modification parameter files
+PARAMS_DIR = os.path.join(os.path.dirname(__file__), "..", "params")
+VOICE_MOD_PARAM_FILES = ["None"]  # Default: no voice modification
+if os.path.isdir(PARAMS_DIR):
+    for file in sorted(os.listdir(PARAMS_DIR)):
+        if file.endswith('.json'):
+            VOICE_MOD_PARAM_FILES.append(file)
+log.info(f"Available voice modification parameter files: {VOICE_MOD_PARAM_FILES}")
+
+
+def compute_audio_hash(audio_bytes: bytes) -> str:
+    """
+    Compute SHA256 hash of audio file for inter-user tracking.
+    
+    This enables:
+    - Distributing same audio to multiple users
+    - Tracking inter-annotator agreement
+    - Identifying which PII segments users annotate differently
+    
+    Args:
+        audio_bytes: Raw audio file bytes
+    
+    Returns:
+        64-character hexadecimal hash string
+    """
+    return hashlib.sha256(audio_bytes).hexdigest()
 
 
 # Database query functions for history and statistics
@@ -254,8 +282,8 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
             scale=1
         )
         voice_mod_params = gr.Dropdown(
-            choices=["mixed_medium_alt.json", "None"],
-            value="mixed_medium_alt.json",
+            choices=VOICE_MOD_PARAM_FILES,
+            value="test_07_mcadams_high.json" if "test_07_mcadams_high.json" in VOICE_MOD_PARAM_FILES else "None",
             label="Voice Modification Parameters",
             scale=2
         )
@@ -457,8 +485,12 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                     duration=len(out_audio) / 1000.0,
                 )
                 
-                # Log each annotation's surrogate usage
-                db_logger.log_annotation_surrogates(surrogate_usage)
+                # Compute audio file hash for inter-user tracking
+                audio_hash = compute_audio_hash(audio_bytes)
+                log.info(f"Audio file hash: {audio_hash[:16]}...")
+                
+                # Log each annotation's surrogate usage with audio hash
+                db_logger.log_annotation_surrogates(surrogate_usage, audio_file_hash=audio_hash)
 
             return out_path
 
