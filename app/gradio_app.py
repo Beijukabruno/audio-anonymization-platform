@@ -283,7 +283,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
         )
         voice_mod_params = gr.Dropdown(
             choices=VOICE_MOD_PARAM_FILES,
-            value="test_07_mcadams_high.json" if "test_07_mcadams_high.json" in VOICE_MOD_PARAM_FILES else "None",
+            value="test_06_vtln_only.json" if "test_06_vtln_only.json" in VOICE_MOD_PARAM_FILES else "None",
             label="Voice Modification Parameters",
             scale=2
         )
