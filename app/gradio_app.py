@@ -271,6 +271,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
     gr.Markdown("# Audio Anonymizer (Gradio)")
     gr.Markdown("Upload or record audio, add annotations with precise time slots, and anonymize PII regions.")
     with gr.Row():
+        operator_name = gr.Textbox(label="Operator Name", value="", placeholder="Enter your name", interactive=True)
         audio_in = gr.Audio(type="filepath", label="Upload or Record Audio")
     # Waveform section removed as requested
     
@@ -366,9 +367,10 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
         outputs=[table, status_msg],
     )
 
-    def run(audio, table_data, fmt, voice_mod_params_selected):
+    def run(audio, table_data, fmt, voice_mod_params_selected, operator_name_input):
         """Process audio with annotations (with database logging)."""
         log.info("=== Starting anonymization process ===")
+        log.info(f"Operator: {operator_name_input}")
         log.info(f"Output format: {fmt}")
         log.info(f"Voice modification params: {voice_mod_params_selected}")
         
@@ -492,6 +494,40 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
                 # Log each annotation's surrogate usage with audio hash
                 db_logger.log_annotation_surrogates(surrogate_usage, audio_file_hash=audio_hash)
 
+            # Log to IOA database
+            try:
+                from backend.ioa_database import SessionLocal
+                from backend.ioa_models import Operator as IOAOperator, Entity as IOAEntity, Annotation as IOAAnnotation
+                session = SessionLocal()
+                # Get or create operator
+                operator_obj = session.query(IOAOperator).filter_by(name=operator_name_input).first()
+                if not operator_obj:
+                    operator_obj = IOAOperator(name=operator_name_input)
+                    session.add(operator_obj)
+                    session.commit()
+                # Get or create entity (audio file)
+                entity_obj = session.query(IOAEntity).filter_by(audio_file=input_filename).first()
+                if not entity_obj:
+                    entity_obj = IOAEntity(audio_file=input_filename, description="")
+                    session.add(entity_obj)
+                    session.commit()
+                # Add annotations
+                for ann in annotations_local:
+                    ioa_ann = IOAAnnotation(
+                        operator_id=operator_obj.id,
+                        entity_id=entity_obj.id,
+                        start_time=ann.start_sec,
+                        stop_time=ann.end_sec,
+                        label=ann.label,
+                        comments="",
+                        timestamp=datetime.now()
+                    )
+                    session.add(ioa_ann)
+                session.commit()
+                session.close()
+                log.info(f"Logged {len(annotations_local)} annotations to IOA database for operator '{operator_name_input}'")
+            except Exception as e:
+                log.error(f"Failed to log to IOA database: {e}")
             return out_path
 
         if DB_ENABLED and ProcessingJobLogger:
@@ -525,7 +561,7 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
 
     anonymize_btn.click(
         run,
-        inputs=[audio_in, table, output_format, voice_mod_params],
+        inputs=[audio_in, table, output_format, voice_mod_params, operator_name],
         outputs=audio_out,
     )
 
@@ -639,5 +675,11 @@ if __name__ == "__main__":
             log.info("Database initialized successfully")
         except Exception as e:
             log.error(f"Failed to initialize database: {e}")
-    
+    # Initialize IOA database
+    try:
+        from backend.ioa_database import init_db as init_ioa_db
+        init_ioa_db()
+        print("IOA database initialized successfully")
+    except Exception as e:
+        print(f"IOA DB init error: {e}")
     app.launch()
