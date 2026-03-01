@@ -680,6 +680,10 @@ with gr.Blocks(title="IOA Monitoring") as ioa_tab:
 
     operator_stats = gr.JSON(label="Operator Activity Summary")
     entity_stats = gr.JSON(label="Entity Annotation Summary")
+    unique_operators = gr.Textbox(label="Unique Operator Names", interactive=False)
+    audio_counts = gr.Textbox(label="Audio Counts per User", interactive=False)
+    export_ioa_btn = gr.Button("Export IOA CSV", variant="primary")
+    ioa_csv_file = gr.File(label="Download IOA CSV", interactive=False)
 
     def load_ioa_annotations(operator_name, audio_file):
         import pandas as pd
@@ -705,30 +709,75 @@ with gr.Blocks(title="IOA Monitoring") as ioa_tab:
             ])
         # Operator stats
         op_stats = {}
+        audio_counts_dict = {}
         for op in session.query(IOAOperator).all():
             count = session.query(IOAAnnotation).filter(IOAAnnotation.operator_id == op.id).count()
             op_stats[op.name] = {"annotations": count}
+            # Count unique audio files per operator
+            audio_files = session.query(IOAEntity.audio_file).join(IOAAnnotation, IOAEntity.id == IOAAnnotation.entity_id).filter(IOAAnnotation.operator_id == op.id).distinct().all()
+            audio_counts_dict[op.name] = len(audio_files)
         # Entity stats
         ent_stats = {}
         for ent in session.query(IOAEntity).all():
             count = session.query(IOAAnnotation).filter(IOAAnnotation.entity_id == ent.id).count()
             ent_stats[ent.audio_file] = {"annotations": count}
+        # Unique operator names
+        unique_ops = ", ".join(sorted(op_stats.keys()))
+        # Audio counts per user summary
+        audio_counts_summary = ", ".join([f"{k}: {v}" for k, v in audio_counts_dict.items()])
         session.close()
         # Return as DataFrame for Gradio
         df = pd.DataFrame(table, columns=headers)
-        return df, op_stats, ent_stats
+        return df, op_stats, ent_stats, unique_ops, audio_counts_summary
 
     refresh_ioa_btn.click(
         load_ioa_annotations,
         inputs=[operator_filter, entity_filter],
-        outputs=[ioa_table, operator_stats, entity_stats],
+        outputs=[ioa_table, operator_stats, entity_stats, unique_operators, audio_counts],
     )
 
     # Initial load
     ioa_tab.load(
         load_ioa_annotations,
         inputs=[operator_filter, entity_filter],
-        outputs=[ioa_table, operator_stats, entity_stats],
+        outputs=[ioa_table, operator_stats, entity_stats, unique_operators, audio_counts],
+    )
+
+    def export_ioa_csv(operator_name, audio_file):
+        import pandas as pd
+        session = IOASessionLocal()
+        query = session.query(IOAAnnotation, IOAOperator, IOAEntity).join(IOAOperator, IOAAnnotation.operator_id == IOAOperator.id).join(IOAEntity, IOAAnnotation.entity_id == IOAEntity.id)
+        if operator_name:
+            query = query.filter(IOAOperator.name == operator_name)
+        if audio_file:
+            query = query.filter(IOAEntity.audio_file == audio_file)
+        results = query.order_by(IOAAnnotation.timestamp.desc()).all()
+        table = []
+        for ann, op, ent in results:
+            table.append([
+                op.name,
+                ent.audio_file,
+                ann.start_time,
+                ann.stop_time,
+                ann.label,
+                ann.timestamp.strftime("%Y-%m-%d %H:%M:%S") if ann.timestamp else "",
+                ann.comments or ""
+            ])
+        headers = ["Operator", "Audio File", "Start", "Stop", "Label", "Timestamp", "Comments"]
+        df = pd.DataFrame(table, columns=headers)
+        # Save to output directory
+        output_dir = os.path.join(os.path.dirname(__file__), "..", "output")
+        os.makedirs(output_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_path = os.path.join(output_dir, f"ioa_annotations_{timestamp}.csv")
+        df.to_csv(csv_path, index=False)
+        session.close()
+        return csv_path
+
+    export_ioa_btn.click(
+        export_ioa_csv,
+        inputs=[operator_filter, entity_filter],
+        outputs=ioa_csv_file,
     )
 
 with gr.TabbedInterface(
