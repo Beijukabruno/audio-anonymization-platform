@@ -100,9 +100,11 @@ To support fine-grained inter-operator agreement analysis, a new dedicated SQLit
 - All annotation details (including operator name, audio file, timestamps, and labels) are logged to the IOA database for every session.
 - Analysis scripts can query this database to compare annotations across operators and generate agreement reports.
 
+
 ### Deployment
-- No changes to Docker Compose are required for SQLite (the default). The database file is created automatically in the project root.
-- If you wish to use a different database backend, update `backend/ioa_database.py` accordingly and add the service to your `docker-compose.yml`.
+- The IOA database now uses PostgreSQL for full persistence and automation. No manual steps are required; tables are created automatically on startup.
+- The connection uses the same credentials as the main database (see `docker-compose.yml`).
+- All IOA annotation data is stored in PostgreSQL and will persist across pushes, updates, and container restarts.
 
 ### Usage
 - On startup, the platform initializes both the main and IOA databases.

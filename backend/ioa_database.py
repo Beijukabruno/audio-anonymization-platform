@@ -4,15 +4,15 @@ Database handler for IOA (Inter-Operator Agreement) database
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from backend.ioa_models import Base
+import os
 
-DB_PATH = 'sqlite:///inter_operator_agreement.db'
-engine = create_engine(DB_PATH)
+# Use DATABASE_URL from environment or default to local PostgreSQL
+DB_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://audio_user:audio_dev_password@postgres:5432/audio_anony"
+)
+engine = create_engine(DB_URL)
 SessionLocal = sessionmaker(bind=engine)
 
 def init_db():
     Base.metadata.create_all(engine)
-
-# Usage:
-# from backend.ioa_database import SessionLocal, init_db
-# session = SessionLocal()
-# ...
