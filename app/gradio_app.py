@@ -682,6 +682,7 @@ with gr.Blocks(title="IOA Monitoring") as ioa_tab:
     entity_stats = gr.JSON(label="Entity Annotation Summary")
 
     def load_ioa_annotations(operator_name, audio_file):
+        import pandas as pd
         session = IOASessionLocal()
         query = session.query(IOAAnnotation, IOAOperator, IOAEntity).join(IOAOperator, IOAAnnotation.operator_id == IOAOperator.id).join(IOAEntity, IOAAnnotation.entity_id == IOAEntity.id)
         if operator_name:
@@ -689,17 +690,19 @@ with gr.Blocks(title="IOA Monitoring") as ioa_tab:
         if audio_file:
             query = query.filter(IOAEntity.audio_file == audio_file)
         results = query.order_by(IOAAnnotation.timestamp.desc()).limit(100).all()
-        data = []
+        # Prepare table as list of lists for Gradio Dataframe
+        headers = ["Operator", "Audio File", "Start", "Stop", "Label", "Timestamp", "Comments"]
+        table = []
         for ann, op, ent in results:
-            data.append({
-                "Operator": op.name,
-                "Audio File": ent.audio_file,
-                "Start": ann.start_time,
-                "Stop": ann.stop_time,
-                "Label": ann.label,
-                "Timestamp": ann.timestamp.strftime("%Y-%m-%d %H:%M:%S") if ann.timestamp else "",
-                "Comments": ann.comments or ""
-            })
+            table.append([
+                op.name,
+                ent.audio_file,
+                ann.start_time,
+                ann.stop_time,
+                ann.label,
+                ann.timestamp.strftime("%Y-%m-%d %H:%M:%S") if ann.timestamp else "",
+                ann.comments or ""
+            ])
         # Operator stats
         op_stats = {}
         for op in session.query(IOAOperator).all():
@@ -711,7 +714,9 @@ with gr.Blocks(title="IOA Monitoring") as ioa_tab:
             count = session.query(IOAAnnotation).filter(IOAAnnotation.entity_id == ent.id).count()
             ent_stats[ent.audio_file] = {"annotations": count}
         session.close()
-        return data, op_stats, ent_stats
+        # Return as DataFrame for Gradio
+        df = pd.DataFrame(table, columns=headers)
+        return df, op_stats, ent_stats
 
     refresh_ioa_btn.click(
         load_ioa_annotations,
