@@ -24,6 +24,8 @@ if PROJECT_ROOT not in sys.path:
 
 from backend.models import Annotation
 from backend.audio_processing import anonymize_to_bytes
+from backend.ioa_database import SessionLocal as IOASessionLocal
+from backend.ioa_models import Operator as IOAOperator, Entity as IOAEntity, Annotation as IOAAnnotation
 
 # Try to import database functionality (graceful degradation if DB not available)
 try:
@@ -659,9 +661,74 @@ with gr.Blocks(title="Logs & Stats") as logs_tab:
     )
 
 # Combine minimal tabs
+
+# IOA Monitoring Tab
+with gr.Blocks(title="IOA Monitoring") as ioa_tab:
+    gr.Markdown("# Inter-Operator Agreement Monitoring")
+    gr.Markdown("View recent annotations, operator activity, and entity summary from the IOA database.")
+
+    with gr.Row():
+        operator_filter = gr.Textbox(label="Filter by Operator Name", value="", placeholder="(leave blank for all)")
+        entity_filter = gr.Textbox(label="Filter by Audio File", value="", placeholder="(leave blank for all)")
+        refresh_ioa_btn = gr.Button("Refresh", variant="secondary")
+
+    ioa_table = gr.Dataframe(
+        label="Recent IOA Annotations",
+        interactive=False,
+        wrap=True,
+    )
+
+    operator_stats = gr.JSON(label="Operator Activity Summary")
+    entity_stats = gr.JSON(label="Entity Annotation Summary")
+
+    def load_ioa_annotations(operator_name, audio_file):
+        session = IOASessionLocal()
+        query = session.query(IOAAnnotation, IOAOperator, IOAEntity).join(IOAOperator, IOAAnnotation.operator_id == IOAOperator.id).join(IOAEntity, IOAAnnotation.entity_id == IOAEntity.id)
+        if operator_name:
+            query = query.filter(IOAOperator.name == operator_name)
+        if audio_file:
+            query = query.filter(IOAEntity.audio_file == audio_file)
+        results = query.order_by(IOAAnnotation.timestamp.desc()).limit(100).all()
+        data = []
+        for ann, op, ent in results:
+            data.append({
+                "Operator": op.name,
+                "Audio File": ent.audio_file,
+                "Start": ann.start_time,
+                "Stop": ann.stop_time,
+                "Label": ann.label,
+                "Timestamp": ann.timestamp.strftime("%Y-%m-%d %H:%M:%S") if ann.timestamp else "",
+                "Comments": ann.comments or ""
+            })
+        # Operator stats
+        op_stats = {}
+        for op in session.query(IOAOperator).all():
+            count = session.query(IOAAnnotation).filter(IOAAnnotation.operator_id == op.id).count()
+            op_stats[op.name] = {"annotations": count}
+        # Entity stats
+        ent_stats = {}
+        for ent in session.query(IOAEntity).all():
+            count = session.query(IOAAnnotation).filter(IOAAnnotation.entity_id == ent.id).count()
+            ent_stats[ent.audio_file] = {"annotations": count}
+        session.close()
+        return data, op_stats, ent_stats
+
+    refresh_ioa_btn.click(
+        load_ioa_annotations,
+        inputs=[operator_filter, entity_filter],
+        outputs=[ioa_table, operator_stats, entity_stats],
+    )
+
+    # Initial load
+    ioa_tab.load(
+        load_ioa_annotations,
+        inputs=[operator_filter, entity_filter],
+        outputs=[ioa_table, operator_stats, entity_stats],
+    )
+
 with gr.TabbedInterface(
-    [demo, logs_tab],
-    ["Anonymize", "Logs"],
+    [demo, logs_tab, ioa_tab],
+    ["Anonymize", "Logs", "IOA Monitor"],
     title="Audio Anonymization Platform"
 ) as app:
     pass

@@ -86,4 +86,27 @@ README.md
 - For consistent output, supply surrogate clips with similar loudness.
 - MP3 export requires ffmpeg; otherwise use WAV.
 - Direct swap will change total duration if surrogate length differs; choose Fit mode to keep duration unchanged.
-# audio-anonymization-platform
+
+## Inter-Operator Agreement (IOA) Database
+
+To support fine-grained inter-operator agreement analysis, a new dedicated SQLite database (`inter_operator_agreement.db`) is used. This database is separate from the main processing database to avoid mixing annotation and processing data.
+
+### What was added
+- A new database schema (see `backend/ioa_models.py`) with tables for:
+  - Operators (names/IDs)
+  - Entities (audio files)
+  - Annotations (operator, entity, start/stop timestamps, label, comments)
+- The Gradio UI now requires an operator name for each annotation session.
+- All annotation details (including operator name, audio file, timestamps, and labels) are logged to the IOA database for every session.
+- Analysis scripts can query this database to compare annotations across operators and generate agreement reports.
+
+### Deployment
+- No changes to Docker Compose are required for SQLite (the default). The database file is created automatically in the project root.
+- If you wish to use a different database backend, update `backend/ioa_database.py` accordingly and add the service to your `docker-compose.yml`.
+
+### Usage
+- On startup, the platform initializes both the main and IOA databases.
+- When annotating audio, enter your operator name in the UI. All annotations will be saved for agreement analysis.
+- Use the provided analysis script (`scripts/inter_operator_agreement.py`) to extract and compare annotation data.
+
+For more details, see `backend/ioa_models.py` and `backend/ioa_database.py`.
