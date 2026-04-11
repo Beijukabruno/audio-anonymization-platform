@@ -67,3 +67,7 @@ jobs:
 
             # Show status of running containers
             docker compose -f docker-compose.prod.yml ps
+
+
+
+            
