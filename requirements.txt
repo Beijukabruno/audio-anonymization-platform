@@ -1,5 +1,5 @@
 streamlit>=1.30.0
-gradio>=4.0.0
+gradio==5.31.0
 pydub>=0.25.1
 alembic==1.16.5
 audioread==3.0.1
