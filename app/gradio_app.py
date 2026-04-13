@@ -1,6 +1,9 @@
 import os
 import logging
 import hashlib
+import platform
+import socket
+import subprocess
 from typing import List, Dict, Any
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -74,6 +77,32 @@ def compute_audio_hash(audio_bytes: bytes) -> str:
     return hashlib.sha256(audio_bytes).hexdigest()
 
 
+def get_runtime_trace() -> Dict[str, str]:
+    """Collect runtime and build metadata for startup logs."""
+    trace = {
+        "python": platform.python_version(),
+        "hostname": socket.gethostname(),
+        "gradio": getattr(gr, "__version__", "unknown"),
+        "build_label": os.environ.get("BUILD_LABEL", "unknown"),
+        "image_tag": os.environ.get("IMAGE_TAG", "unknown"),
+    }
+
+    git_sha = os.environ.get("GIT_SHA")
+    if not git_sha:
+        try:
+            git_sha = subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=PROJECT_ROOT,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+        except Exception:
+            git_sha = "unknown"
+
+    trace["git_sha"] = git_sha
+    return trace
+
+
 # Database query functions for history and statistics
 def query_processing_history(
     status_filter: str = "all",
@@ -81,6 +110,12 @@ def query_processing_history(
     limit: int = 100
 ) -> pd.DataFrame:
     """Query processing history from database."""
+    log.info(
+        "query_processing_history(status_filter=%s, days_back=%s, limit=%s)",
+        status_filter,
+        days_back,
+        limit,
+    )
     if not DB_ENABLED:
         return pd.DataFrame({"message": ["Database not available"]})
     
@@ -142,6 +177,7 @@ def query_processing_history(
 
 def get_statistics_summary() -> Dict[str, Any]:
     """Get summary statistics from database."""
+    log.info("get_statistics_summary()")
     if not DB_ENABLED:
         return {"message": "Database not available"}
     
@@ -184,6 +220,7 @@ def get_statistics_summary() -> Dict[str, Any]:
 
 def export_to_csv() -> str:
     """Export processing history to CSV file."""
+    log.info("export_to_csv()")
     if not DB_ENABLED:
         return None
     
@@ -211,6 +248,7 @@ def export_to_csv() -> str:
 
 
 def process(audio: tuple, table: List[Dict[str, Any]], output_format: str = "wav"):
+    log.info("process(output_format=%s, table_rows=%s)", output_format, len(table or []))
     if audio is None:
         return None
     # Gradio audio tuple: (sr, np.ndarray) or filepath depending on source
@@ -352,6 +390,13 @@ with gr.Blocks(title="Audio Anonymizer (Gradio)") as demo:
 
     def add_annotation(start, end, gend, lbl, current_table):
         """Add a new row to the annotations table."""
+        log.info(
+            "add_annotation(start=%s, end=%s, gender=%s, label=%s)",
+            start,
+            end,
+            gend,
+            lbl,
+        )
         if start is None or end is None:
             return current_table, "Provide both start and end times"
         if end <= start:
@@ -607,10 +652,12 @@ with gr.Blocks(title="Logs & Stats") as logs_tab:
             refresh_stats_btn = gr.Button("Refresh Stats", variant="secondary")
 
     def load_history(status, days, limit):
+        log.info("load_history(status=%s, days=%s, limit=%s)", status, days, limit)
         df = query_processing_history(status, int(days), int(limit))
         return df
 
     def export_history():
+        log.info("export_history()")
         csv_path = export_to_csv()
         if csv_path:
             return f"Exported: {os.path.basename(csv_path)}", csv_path
@@ -618,6 +665,7 @@ with gr.Blocks(title="Logs & Stats") as logs_tab:
             return "Export failed or no data", None
 
     def load_stats():
+        log.info("load_stats()")
         stats = get_statistics_summary()
         if "error" in stats or "message" in stats:
             markdown = f"**{stats.get('error', stats.get('message', 'N/A'))}**"
@@ -686,6 +734,7 @@ with gr.Blocks(title="IOA Monitoring") as ioa_tab:
     ioa_csv_file = gr.File(label="Download IOA CSV", interactive=False)
 
     def load_ioa_annotations(operator_name, audio_file):
+        log.info("load_ioa_annotations(operator_name=%s, audio_file=%s)", operator_name, audio_file)
         import pandas as pd
         session = IOASessionLocal()
         query = session.query(IOAAnnotation, IOAOperator, IOAEntity).join(IOAOperator, IOAAnnotation.operator_id == IOAOperator.id).join(IOAEntity, IOAAnnotation.entity_id == IOAEntity.id)
@@ -744,6 +793,7 @@ with gr.Blocks(title="IOA Monitoring") as ioa_tab:
     )
 
     def export_ioa_csv(operator_name, audio_file):
+        log.info("export_ioa_csv(operator_name=%s, audio_file=%s)", operator_name, audio_file)
         import pandas as pd
         session = IOASessionLocal()
         query = session.query(IOAAnnotation, IOAOperator, IOAEntity).join(IOAOperator, IOAAnnotation.operator_id == IOAOperator.id).join(IOAEntity, IOAAnnotation.entity_id == IOAEntity.id)
@@ -788,6 +838,9 @@ with gr.TabbedInterface(
     pass
 
 if __name__ == "__main__":
+    log.info("Starting Gradio app startup sequence")
+    log.info("DB_ENABLED=%s, SURROGATES_ROOT=%s", DB_ENABLED, SURROGATES_ROOT)
+    log.info("Runtime trace: %s", get_runtime_trace())
     # Initialize database on startup
     if DB_ENABLED:
         try:
@@ -803,4 +856,11 @@ if __name__ == "__main__":
         print("IOA database initialized successfully")
     except Exception as e:
         print(f"IOA DB init error: {e}")
-    app.launch()
+    log.info("Launching Gradio app with explicit server settings")
+    app.launch(
+        server_name=os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0"),
+        server_port=int(os.environ.get("GRADIO_SERVER_PORT", "7860")),
+        show_error=True,
+        debug=True,
+        prevent_thread_lock=False,
+    )
